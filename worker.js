@@ -267,7 +267,7 @@ function anyDateToISO(d) {
   if (/^\d{8}$/.test(s)) return s.slice(0, 4) + "-" + s.slice(4, 6) + "-" + s.slice(6, 8);
   return s;
 }
-function codeOf(r) { return String(r.Code || r["公司代號"] || r["證券代號"] || "").trim(); }
+function codeOf(r) { return String(r.Code || r["公司代號"] || r["證券代號"] || r["股票代號"] || "").trim(); }
 
 async function buildExtra(code) {
   const [basic, rev, fin, div, margn, qfiis, news, mkt] = await Promise.all([
@@ -276,7 +276,11 @@ async function buildExtra(code) {
     twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap14_L", 3600).catch(() => null),
     twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap45_L", 3600).catch(() => null),
     twFetch("https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN", 1800).catch(() => null),
-    twFetch("https://openapi.twse.com.tw/v1/fund/MI_QFIIS", 1800).catch(() => null),
+    (async () => {
+      const a = await twFetch("https://openapi.twse.com.tw/v1/fund/MI_QFIIS", 1800).catch(() => null);
+      if (Array.isArray(a) && a.length) return a;
+      return twFetch("https://openapi.twse.com.tw/v1/fund/MI_QFIIS_sort_20", 1800).catch(() => null);
+    })(),
     twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap04_L", 600).catch(() => null),
     twFetch("https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK", 1800).catch(() => null)
   ]);
