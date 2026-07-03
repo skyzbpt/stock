@@ -256,6 +256,142 @@ async function buildSnapshot(code) {
   return snap;
 }
 
+// ---- 個股延伸資料（基本面／籌碼／重大訊息／大盤）----
+const INDUSTRY = { "01":"水泥工業","02":"食品工業","03":"塑膠工業","04":"紡織纖維","05":"電機機械","06":"電器電纜","08":"玻璃陶瓷","09":"造紙工業","10":"鋼鐵工業","11":"橡膠工業","12":"汽車工業","14":"建材營造","15":"航運業","16":"觀光餐旅","17":"金融保險","18":"貿易百貨","19":"綜合","20":"其他","21":"化學工業","22":"生技醫療","23":"油電燃氣","24":"半導體","25":"電腦及週邊設備","26":"光電","27":"通信網路","28":"電子零組件","29":"電子通路","30":"資訊服務","31":"其他電子","32":"文化創意","33":"農業科技","34":"電子商務","35":"綠能環保","36":"數位雲端","37":"運動休閒","38":"居家生活" };
+
+function anyDateToISO(d) {
+  const s = String(d || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (s.indexOf("/") !== -1) return rocToISO(s);
+  if (/^\d{7}$/.test(s)) return (parseInt(s.slice(0, 3), 10) + 1911) + "-" + s.slice(3, 5) + "-" + s.slice(5, 7);
+  if (/^\d{8}$/.test(s)) return s.slice(0, 4) + "-" + s.slice(4, 6) + "-" + s.slice(6, 8);
+  return s;
+}
+function codeOf(r) { return String(r.Code || r["公司代號"] || r["證券代號"] || "").trim(); }
+
+async function buildExtra(code) {
+  const [basic, rev, fin, div, margn, qfiis, news, mkt] = await Promise.all([
+    twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap03_L", 3600).catch(() => null),
+    twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap05_L", 3600).catch(() => null),
+    twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap14_L", 3600).catch(() => null),
+    twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap45_L", 3600).catch(() => null),
+    twFetch("https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN", 1800).catch(() => null),
+    twFetch("https://openapi.twse.com.tw/v1/fund/MI_QFIIS", 1800).catch(() => null),
+    twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap04_L", 600).catch(() => null),
+    twFetch("https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK", 1800).catch(() => null)
+  ]);
+  const out = { code, asOf: new Date().toISOString(),
+    source: "臺灣證券交易所 OpenAPI（基本資料／月營收／季報／股利／信用交易／外資持股／重大訊息／大盤）",
+    profile: null, monthlyRevenue: null, quarterly: null, dividend: null,
+    margin: null, foreign: null, announcements: null, marketIndex: null, notes: [] };
+
+  // 公司基本資料 → 產業別、股本
+  if (Array.isArray(basic)) {
+    const r = basic.find((x) => codeOf(x) === code);
+    if (r) {
+      const shares = num(pick(r, ["已發行普通股數"]));
+      const capital = num(pick(r, ["實收資本額"]));
+      out.profile = {
+        industry: INDUSTRY[String(pick(r, ["產業別"]) || "").trim()] || null,
+        sharesB: shares != null ? +(shares / 1e8).toFixed(2) : (capital != null ? +(capital / 10 / 1e8).toFixed(2) : null),
+        capitalB: capital != null ? +(capital / 1e8).toFixed(1) : null,
+        unit: "sharesB=億股, capitalB=億元"
+      };
+    }
+  }
+  // 月營收（千元 → 億元）
+  if (Array.isArray(rev)) {
+    const r = rev.find((x) => codeOf(x) === code);
+    if (r) {
+      const cur = num(pick(r, ["-當月營收", "當月營收"]));
+      const ytd = num(pick(r, ["當月累計營收"]));
+      out.monthlyRevenue = {
+        ym: String(pick(r, ["資料年月"]) || "").trim() || null,
+        revenueB: cur != null ? +(cur / 1e5).toFixed(2) : null,
+        momPct: num(pick(r, ["上月比較增減"])),
+        yoyPct: num(pick(r, ["去年同月增減"])),
+        ytdB: ytd != null ? +(ytd / 1e5).toFixed(1) : null,
+        ytdYoyPct: num(pick(r, ["前期比較增減"])),
+        unit: "revenueB/ytdB=億元, 其餘=%"
+      };
+    }
+  }
+  // 最新季報（一般業；金融保險業無此彙總表）
+  if (Array.isArray(fin)) {
+    const rows = fin.filter((x) => codeOf(x) === code);
+    const r = rows.length ? rows[rows.length - 1] : null;
+    if (r) {
+      const rv = num(pick(r, ["營業收入"]));
+      const gp = num(pick(r, ["營業毛利"]));
+      const ni = num(pick(r, ["本期淨利"]));
+      out.quarterly = {
+        period: (String(pick(r, ["年度"]) || "").trim() + " Q" + String(pick(r, ["季別"]) || "").trim()).trim(),
+        eps: num(pick(r, ["基本每股盈餘"])),
+        revenueB: rv != null ? +(rv / 1e5).toFixed(1) : null,
+        grossMarginPct: (rv && gp != null) ? +(gp / rv * 100).toFixed(2) : null,
+        netMarginPct: (rv && ni != null) ? +(ni / rv * 100).toFixed(2) : null,
+        netIncomeB: ni != null ? +(ni / 1e5).toFixed(1) : null
+      };
+    }
+  }
+  // 股利分派（現金＝盈餘＋公積；股票＝盈餘轉增資＋公積轉增資，單位 元/股）
+  if (Array.isArray(div)) {
+    const rows = div.filter((x) => codeOf(x) === code);
+    const r = rows.length ? rows[rows.length - 1] : null;
+    if (r) {
+      const c1 = num(pick(r, ["盈餘分配之現金股利"]));
+      const c2 = num(pick(r, ["公積發放之現金"]));
+      const s1 = num(pick(r, ["盈餘轉增資配股"]));
+      const s2 = num(pick(r, ["公積轉增資配股"]));
+      out.dividend = {
+        year: String(pick(r, ["股利年度"]) || "").trim() || null,
+        cash: (c1 != null || c2 != null) ? +(((c1 || 0) + (c2 || 0)).toFixed(4)) : null,
+        stock: (s1 != null || s2 != null) ? +(((s1 || 0) + (s2 || 0)).toFixed(4)) : null
+      };
+    }
+  }
+  // 融資融券餘額（張）
+  if (Array.isArray(margn)) {
+    const r = margn.find((x) => codeOf(x) === code);
+    if (r) {
+      const mb = num(pick(r, ["MarginBalance", "融資今日餘額", "TodayBalance"]));
+      const mp = num(pick(r, ["MarginBalancePreviousDay", "融資前日餘額", "PreviousDayBalance"]));
+      const sb = num(pick(r, ["ShortBalance", "融券今日餘額"]));
+      out.margin = {
+        unit: "張",
+        marginBalanceLots: mb,
+        marginChangeLots: (mb != null && mp != null) ? mb - mp : null,
+        shortBalanceLots: sb
+      };
+    }
+  }
+  // 外資及陸資持股比率（%）
+  if (Array.isArray(qfiis)) {
+    const r = qfiis.find((x) => codeOf(x) === code);
+    if (r) out.foreign = { holdingPct: num(pick(r, ["持股比率"])) };
+  }
+  // 當日重大訊息（最多 3 則）
+  if (Array.isArray(news)) {
+    const rows = news.filter((x) => codeOf(x) === code);
+    if (rows.length) {
+      out.announcements = rows.slice(-3).reverse().map((r) => ({
+        date: anyDateToISO(pick(r, ["發言日期"])),
+        subject: String(pick(r, ["主旨"]) || "").trim().slice(0, 80)
+      }));
+    }
+  }
+  // 大盤（加權指數）最新一日
+  if (Array.isArray(mkt) && mkt.length) {
+    const r = mkt[mkt.length - 1];
+    out.marketIndex = {
+      date: anyDateToISO(pick(r, ["Date", "日期"])),
+      index: num(pick(r, ["TAIEX", "發行量加權股價指數"])),
+      change: num(pick(r, ["Change", "漲跌點數"]))
+    };
+  }
+  return out;
+}
+
 // ---- 全市場掃描（市場雷達）----
 async function buildScreen() {
   const [dayAll, bwibbu, t86] = await Promise.all([
@@ -450,6 +586,12 @@ export default {
         return json(await buildScreen());
       }
 
+      if (url.pathname === "/api/extra") {
+        const code = (url.searchParams.get("code") || "").trim().toUpperCase();
+        if (!/^\d{4,6}[A-Z]?$/.test(code)) return json({ error: "請提供有效的股票代號（例如 2330）" }, 400);
+        return json(await buildExtra(code));
+      }
+
       if (url.pathname === "/api/analyze" && request.method === "POST") {
         if (!env.ANTHROPIC_API_KEY) return json({ error: "伺服器尚未設定 ANTHROPIC_API_KEY 密鑰" }, 500);
         const body = await request.json().catch(() => ({}));
@@ -463,7 +605,7 @@ export default {
       }
 
       if (url.pathname === "/" || url.pathname === "/api") {
-        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/screen", "POST /api/analyze", "POST /api/news"] });
+        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/screen", "POST /api/analyze", "POST /api/news"] });
       }
       return json({ error: "Not found" }, 404);
     } catch (e) {
