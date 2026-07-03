@@ -72,6 +72,45 @@ async function twFetch(u, ttl) {
   return res.json();
 }
 
+// ---- 盤中／當日即時快照（TWSE MIS，約 5 秒延遲）----
+async function fetchRealtime(code) {
+  const urls = [
+    "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_" + code + ".tw&json=1&delay=0",
+    "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_" + code + ".tw&json=1&delay=0"
+  ];
+  for (const u of urls) {
+    try {
+      const res = await fetch(u, {
+        headers: {
+          "User-Agent": UA,
+          "Accept": "application/json",
+          "Referer": "https://mis.twse.com.tw/stock/index.jsp"
+        },
+        cf: { cacheTtl: 30, cacheEverything: true }
+      });
+      if (!res.ok) continue;
+      const j = await res.json().catch(() => null);
+      const m = j && Array.isArray(j.msgArray) && j.msgArray[0];
+      if (!m || !m.c) continue;
+      const z = num(m.z), y = num(m.y);
+      if (z == null) continue; // 尚無當盤成交（如未開盤），交給收盤資料處理
+      const d = String(m.d || "");
+      const iso = /^\d{8}$/.test(d) ? d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6, 8) : null;
+      return {
+        name: m.n || null,
+        market: m.ex === "otc" ? "上櫃 (TPEx)" : "上市 (TWSE)",
+        date: iso, time: m.t || null,
+        close: z, open: num(m.o), high: num(m.h), low: num(m.l),
+        prevClose: y,
+        change: y != null ? +(z - y).toFixed(2) : null,
+        changePct: (y != null && y !== 0) ? +((z - y) / y * 100).toFixed(2) : null,
+        volumeLots: num(m.v)
+      };
+    } catch (e) { /* 換下一個來源 */ }
+  }
+  return null;
+}
+
 async function fetchHistory(code) {
   // 抓「上月 + 當月」個股日成交，取收盤序列（給走勢圖與技術分析用）
   const now = new Date();
@@ -101,11 +140,12 @@ async function fetchHistory(code) {
 }
 
 async function buildSnapshot(code) {
-  const [dayAll, bwibbu, t86, hist] = await Promise.all([
+  const [dayAll, bwibbu, t86, hist, rt] = await Promise.all([
     twFetch("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", 600).catch(() => null),
     twFetch("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL", 600).catch(() => null),
     twFetch("https://openapi.twse.com.tw/v1/fund/T86", 600).catch(() => null),
-    fetchHistory(code).catch(() => null)
+    fetchHistory(code).catch(() => null),
+    fetchRealtime(code).catch(() => null)
   ]);
 
   const snap = {
@@ -130,6 +170,24 @@ async function buildSnapshot(code) {
       };
     }
   }
+  // 盤中／當日即時快照優先（解決全市場收盤檔更新延遲的問題）
+  if (rt && rt.close != null) {
+    snap.name = snap.name || rt.name;
+    if (rt.market) snap.market = rt.market;
+    const base = snap.price || {};
+    const sameDay = base.close != null && base.close === rt.close;
+    snap.price = {
+      close: rt.close, open: rt.open, high: rt.high, low: rt.low,
+      change: rt.change, changePct: rt.changePct,
+      volumeLots: rt.volumeLots != null ? rt.volumeLots : (base.volumeLots != null ? base.volumeLots : null),
+      tradeValue: sameDay && base.tradeValue != null ? base.tradeValue : null,
+      transactions: sameDay && base.transactions != null ? base.transactions : null
+    };
+    snap.priceDate = rt.date;
+    snap.priceLabel = rt.time === "13:30:00" ? "收盤" : "盤中即時";
+    snap.source = "臺灣證券交易所 OpenAPI ＋ 即時行情快照";
+  }
+
   if (!snap.price) snap.notes.push("查無此代號的上市每日收盤資料（可能為上櫃／興櫃，或當日非交易日）。");
 
   // 估值（本益比／殖利率／股價淨值比）
@@ -169,6 +227,20 @@ async function buildSnapshot(code) {
   // 歷史走勢（若每日收盤缺，用歷史最後一筆補價格）
   if (hist && hist.length) {
     snap.history = hist;
+    // 備援：沒有即時快照時，若全市場收盤檔落後（等於前一日、不等於最新一日），改用個股歷史最新收盤
+    if ((!rt || rt.close == null) && snap.price && hist.length >= 2) {
+      const lastH = hist[hist.length - 1], prevH = hist[hist.length - 2];
+      if (snap.price.close === prevH.close && lastH.close !== snap.price.close) {
+        snap.price.close = lastH.close;
+        snap.price.change = +(lastH.close - prevH.close).toFixed(2);
+        snap.price.changePct = prevH.close ? +((lastH.close - prevH.close) / prevH.close * 100).toFixed(2) : null;
+        snap.price.open = null; snap.price.high = null; snap.price.low = null;
+        snap.price.volumeLots = lastH.volumeLots;
+        snap.price.tradeValue = null; snap.price.transactions = null;
+        snap.priceDate = lastH.date;
+        snap.notes.push("全市場收盤檔尚未更新至最新交易日，價格已改用個股日成交最新一筆。");
+      }
+    }
     if (!snap.price) {
       const last = hist[hist.length - 1], prev = hist[hist.length - 2];
       snap.price = {
