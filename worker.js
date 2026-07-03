@@ -318,12 +318,14 @@ async function buildExtra(code) {
   }
   // 最新季報（一般業；金融保險業無此彙總表）
   if (Array.isArray(fin)) {
-    const rows = fin.filter((x) => codeOf(x) === code);
+    const rows = fin.filter((x) => codeOf(x) === code).sort((a, b) =>
+      ((num(pick(a, ["年度"])) || 0) * 10 + (num(pick(a, ["季別"])) || 0)) -
+      ((num(pick(b, ["年度"])) || 0) * 10 + (num(pick(b, ["季別"])) || 0)));
     const r = rows.length ? rows[rows.length - 1] : null;
     if (r) {
       const rv = num(pick(r, ["營業收入"]));
       const gp = num(pick(r, ["營業毛利"]));
-      const ni = num(pick(r, ["本期淨利"]));
+      const ni = num(pick(r, ["本期淨利", "本期稅後淨利", "稅後淨利", "本期損益", "淨利"]));
       out.quarterly = {
         period: (String(pick(r, ["年度"]) || "").trim() + " Q" + String(pick(r, ["季別"]) || "").trim()).trim(),
         eps: num(pick(r, ["基本每股盈餘"])),
@@ -354,9 +356,9 @@ async function buildExtra(code) {
   if (Array.isArray(margn)) {
     const r = margn.find((x) => codeOf(x) === code);
     if (r) {
-      const mb = num(pick(r, ["MarginBalance", "融資今日餘額", "TodayBalance"]));
+      const mb = num(pick(r, ["MarginBalanceToday", "融資今日餘額", "TodayBalance", "MarginBalance"]));
       const mp = num(pick(r, ["MarginBalancePreviousDay", "融資前日餘額", "PreviousDayBalance"]));
-      const sb = num(pick(r, ["ShortBalance", "融券今日餘額"]));
+      const sb = num(pick(r, ["ShortBalanceToday", "融券今日餘額", "ShortBalance"]));
       out.margin = {
         unit: "張",
         marginBalanceLots: mb,
@@ -368,7 +370,7 @@ async function buildExtra(code) {
   // 外資及陸資持股比率（%）
   if (Array.isArray(qfiis)) {
     const r = qfiis.find((x) => codeOf(x) === code);
-    if (r) out.foreign = { holdingPct: num(pick(r, ["持股比率"])) };
+    if (r) out.foreign = { holdingPct: num(pick(r, ["全體外資及陸資持股比率", "外資及陸資持股比率", "持股比率", "Shareholding"])) };
   }
   // 當日重大訊息（最多 3 則）
   if (Array.isArray(news)) {
@@ -451,6 +453,99 @@ async function buildScreen() {
       hotVolume: topBy((x) => x.volumeLots, (x) => x.volumeLots != null)
     }
   };
+}
+
+// ---- 研究指令（Slash Commands）----
+const RESEARCH_SYS =
+  "你是台股資深研究員助理，為想深入研究的一般投資人產出專業、精準但淺顯的研究內容。原則：\n" +
+  "- 繁體中文、台灣慣用語；專有名詞第一次出現時用括號補一句白話。\n" +
+  "- 數據紀律：我方提供的證交所數據以其為準並標註日期；網路搜尋到的資訊標註來源與日期；查不到就明說「查無資料」，嚴禁編造數字。\n" +
+  "- 區分「事實」與「推論」；多空並陳、保持中立；不下『一定買／一定賣』等指令式建議。\n" +
+  "- 用結構化 Markdown（##標題、表格、條列），開頭不要客套話。\n" +
+  "- 結尾固定加一行：本內容由 AI 彙整，僅供研究參考，不構成投資建議，投資有風險，請自行評估並為自己的決策負責。";
+
+function compactSrv(s) {
+  if (!s) return null;
+  const c = { code: s.code, name: s.name, market: s.market, asOf: s.asOf, price: s.price,
+    priceDate: s.priceDate || null, valuation: s.valuation, institutional: s.institutional, notes: s.notes };
+  if (s.history && s.history.length) c.history = { desc: "每日收盤 [日期,收盤]", points: s.history.slice(-30).map((x) => [x.date, x.close]) };
+  return c;
+}
+function cmdData(x) {
+  let s = "";
+  if (x.snap || x.extra) s += "\n\n【個股最新數據（臺灣證交所，JSON）】\n```json\n" + JSON.stringify({ snapshot: x.snap, extra: x.extra }) + "\n```";
+  if (x.screen) s += "\n\n【全市場掃描（臺灣證交所，JSON；lists 為五份榜單）】\n```json\n" + JSON.stringify(x.screen) + "\n```";
+  if (x.watchTxt) s += "\n\n【使用者自選股清單】" + x.watchTxt;
+  if (x.context) s += "\n\n【使用者先前建立的投資論點（原文）】\n" + x.context;
+  return s;
+}
+
+const CMD = {
+  "earnings-analysis": { needCode: true, web: 8, tokens: 8000, tpl: function (x) { return "指令：/earnings-analysis（財報深度研究報告）\n任務：撰寫 " + x.label + " 的完整財報研究報告，目標 3000～5000 字。\n步驟：先用網路搜尋找出最近一次財報與法說會重點（營收、毛利率、EPS、財測、管理層說法、法人問答焦點、市場預期比較），再結合下方證交所數據撰寫。\n輸出結構：\n1. 標題（公司、季度、撰寫日期）＋ 3～5 點摘要結論\n2. ## 本季關鍵數字（表格，附季增/年增，查得到市場預期就比較）\n3. ## 營運亮點與隱憂\n4. ## 管理層展望與財測\n5. ## 法說會問答重點\n6. ## 估值與同業比較\n7. ## 多空論點整理\n8. ## 風險\n9. ## 後續觀察指標與時點" + cmdData(x); } },
+  "initiating-coverage": { needCode: true, web: 8, tokens: 8000, tpl: function (x) { return "指令：/initiating-coverage（首次覆蓋研究報告）\n任務：對 " + x.label + " 做機構級首次覆蓋報告，依五步驟撰寫長文：\n第一步 ## 公司與商業模式：產品組合、獲利方式、主要客戶與市場（需搜尋補足）\n第二步 ## 產業結構與競爭定位：產業鏈位置、競爭對手、護城河\n第三步 ## 財務體質與成長動能：用下方數據＋搜尋，看營收趨勢、獲利能力、配息\n第四步 ## 估值：至少三種角度交叉（本益比區間、股價淨值比、殖利率法、同業比較），列出計算假設\n第五步 ## 投資論點與風險：核心論點、關鍵假設、風險與失效條件、觀察指標" + cmdData(x); } },
+  "earnings": { needCode: true, web: 4, tokens: 3000, tpl: function (x) { return "指令：/earnings（快速季度財報點評）\n任務：搜尋 " + x.label + " 最新一季財報重點，結合下方數據，輸出精簡點評（500～800 字）：\n1. 一句話結論\n2. ## 關鍵數字（表格：營收/毛利率/EPS 與季增年增）\n3. ## 三個亮點\n4. ## 三個疑慮\n5. ## 下季觀察重點" + cmdData(x); } },
+  "initiate": { needCode: true, web: 3, tokens: 2500, tpl: function (x) { return "指令：/initiate（首次研究流程入口）\n任務：為 " + x.label + " 產出研究起手包：\n1. ## 公司一頁概覽（是做什麼的、賺什麼錢，搜尋補足）\n2. ## 該蒐集的資料清單（依優先順序）\n3. ## 關鍵問題清單（5～8 題，回答了就能形成觀點）\n4. ## 建議的後續指令（例如 /earnings-analysis、/thesis、/catalysts，說明各自時機）" + cmdData(x); } },
+  "screen": { needCode: false, screen: true, web: 0, tokens: 3500, tpl: function (x) { return "指令：/screen（股票篩選）\n使用者條件：" + (x.arg || "未指定，請從榜單中找出數據面最值得留意的標的") + "\n任務：只用下方全市場掃描數據做篩選（不要用網路資訊），輸出：\n1. ## 符合條件的標的（表格：代號/名稱/關鍵數據/上榜原因，最多 10 檔）\n2. ## 每檔一句主要風險\n3. ## 篩選限制說明（此數據只含上市股票的價格/估值/法人榜單，條件超出範圍就明說做不到）" + cmdData(x); } },
+  "sector": { needArg: true, web: 5, tokens: 3500, tpl: function (x) { return "指令：/sector（產業分析報告）\n產業：" + x.arg + "\n任務：搜尋該產業近況（供需、報價、政策、龍頭動態、台廠地位），輸出精簡產業報告：\n1. ## 產業現況（一段）\n2. ## 關鍵驅動因素（3～5 點，附數據或來源）\n3. ## 台股相關公司梳理（表格：公司/代號/在產業鏈的角色/近況一句）\n4. ## 多空整理\n5. ## 風險與觀察指標"; } },
+  "sector-overview": { needArg: true, web: 8, tokens: 8000, tpl: function (x) { return "指令：/sector-overview（完整產業概覽）\n產業：" + x.arg + "\n任務：搜尋撰寫完整產業概覽長文：\n1. ## 產業規模與價值鏈全景\n2. ## 全球競爭格局與台廠角色\n3. ## 需求端趨勢\n4. ## 供給端與產能\n5. ## 技術與政策變數\n6. ## 台股代表公司深度比較（表格＋各一段）\n7. ## 投資切入角度（不同風險屬性怎麼看）\n8. ## 風險\n9. ## 追蹤儀表板（該定期看哪些數據與來源）"; } },
+  "thesis": { needCode: true, web: 4, tokens: 3500, tpl: function (x) { return "指令：/thesis（建立投資論點）\n任務：為 " + x.label + " 建立可被追蹤驗證的投資論點：\n1. ## 核心論點（一段講清楚）\n2. ## 三大支柱（每個支柱附支持數據或搜尋到的證據）\n3. ## 反方論點（最強的空方理由）\n4. ## 關鍵假設與驗證指標（做成表格，指標要可量化、註明去哪查）\n5. ## 失效條件（出現什麼訊號代表論點壞了）\n6. ## 時間框架與催化事件" + cmdData(x); } },
+  "thesis-tracker": { needCode: true, needContext: true, web: 3, tokens: 3000, tpl: function (x) { return "指令：/thesis-tracker（論點追蹤）\n任務：使用者先前為 " + x.label + " 建立過投資論點（附於下方）。請搜尋此後的最新發展、比對下方最新數據，輸出：\n1. ## 論點健康度總評（良好／警示／受損，一句理由）\n2. ## 各支柱逐一檢視（狀態＋最新證據）\n3. ## 假設驗證表（原假設 vs 目前狀況）\n4. ## 是否觸發失效條件\n5. ## 建議更新的內容" + cmdData(x); } },
+  "catalysts": { needCode: true, web: 5, tokens: 3000, tpl: function (x) { return "指令：/catalysts（催化事件）\n任務：搜尋並列出 " + x.label + " 未來 1～6 個月可能影響股價的事件：財報／法說會日期、除權息、新品或擴產、大客戶與訂單、產業事件、政策。日期不確定就標「日期未定」，嚴禁編造日期。\n輸出：\n1. ## 催化事件表（日期/事件/預期影響方向/重要度 高中低/依據來源）\n2. ## 最該優先關注的兩件事與原因" + cmdData(x); } },
+  "catalyst-calendar": { needWatch: true, web: 6, tokens: 3500, tpl: function (x) { return "指令：/catalyst-calendar（自選股催化行事曆）\n任務：為下方自選股清單的每一檔搜尋未來催化事件（財報法說、除權息、產品與訂單、產業與政策），彙整成一份行事曆。日期不確定標「日期未定」，嚴禁編造。\n輸出：\n1. ## 事件行事曆（依日期排序的表格：日期/股票/事件/預期影響/重要度）\n2. ## 本月最該盯的三件事\n3. ## 查無近期事件的股票清單" + cmdData(x); } },
+  "earnings-preview": { needCode: true, web: 5, tokens: 3000, tpl: function (x) { return "指令：/earnings-preview（財報前瞻）\n任務：為 " + x.label + " 做財報公布前的預覽。先搜尋財報／法說會的公布時間與市場預期，再結合下方數據輸出：\n1. ## 公布時間（查不到就說明推測依據）\n2. ## 市場預期與關鍵數字（共識營收/EPS，查得到才寫）\n3. ## 三個最該關注的指標與原因\n4. ## 可能的驚喜與地雷\n5. ## 財報後劇本（優於/符合/低於預期時，各自該觀察什麼）" + cmdData(x); } },
+  "idea-generation": { needCode: false, screen: true, web: 5, tokens: 3500, tpl: function (x) { return "指令：/idea-generation（投資點子產生）\n主題：" + (x.arg || "未指定，請從下方全市場掃描數據找數據面異常或值得研究的方向") + "\n任務：結合下方掃描數據與網路搜尋，產出 3～5 個「研究點子」（不是建議）：\n每個點子包含：## 標的或主題 → 一句論點 → 支持數據（引用實際數字）→ 主要風險 → 下一步驗證方法。\n最後加 ## 提醒：這些是研究起點，需要進一步查證。" + cmdData(x); } },
+  "model-update": { needCode: true, web: 2, tokens: 3000, tpl: function (x) { return "指令：/model-update（估值模型更新）\n任務：用下方最新數據為 " + x.label + " 更新簡易估值模型，列出所有計算過程：\n1. ## 模型輸入更新摘要（現價/EPS/月營收動能/股利/PE/PB，標日期）\n2. ## 目前估值位置（目前 PE、PB、殖利率，與合理區間的推估比較；歷史區間查不到就用產業常識推估並註明）\n3. ## 三情境合理價區間（保守/基準/樂觀：各自假設的 EPS 與倍數，算出區間）\n4. ## 與現價的隱含空間（各情境 %）\n5. ## 模型的限制與該補的資料" + cmdData(x); } },
+  "morning-note": { needCode: false, screen: true, web: 6, tokens: 3500, tpl: function (x) { return "指令：/morning-note（台股晨報）\n任務：整理一份台股盤前晨報。先搜尋近 24 小時重要消息（美股收盤與科技股、半導體產業、影響台股的國際與政策新聞、自選股個股新聞），結合下方大盤與掃描數據，輸出：\n1. ## 今日盤前三重點（一句一點）\n2. ## 國際市場與大盤回顧（附數字）\n3. ## 自選股速覽（每檔一句最新狀況；沒消息就寫「無重大消息」）\n4. ## 今日觀察清單（事件與數據）\n5. ## 風險提示（一兩句）\n風格：像晨會紀要，精簡可讀。" + cmdData(x); } }
+};
+
+async function runCommand(env, body) {
+  const cmdName = String(body.command || "").toLowerCase();
+  const def = CMD[cmdName];
+  if (!def) throw new Error("未知的指令：" + cmdName);
+  const code = (body.code || "").toString().trim().toUpperCase();
+  const arg = (body.arg || "").toString().slice(0, 200).trim();
+  const context = (body.context || "").toString().slice(0, 9000);
+  const watchlist = Array.isArray(body.watchlist) ? body.watchlist.slice(0, 20) : [];
+  if (def.needCode && !/^\d{4,6}[A-Z]?$/.test(code)) throw new Error("此指令需要有效的股票代號");
+  if (def.needArg && !arg) throw new Error("此指令需要輸入主題（例如產業名稱）");
+  if (def.needContext && !context) throw new Error("找不到先前的投資論點，請先執行 /thesis");
+  if (def.needWatch && !watchlist.length) throw new Error("此指令需要自選股清單，請先加入自選股");
+
+  let snap = null, extra = null, screen = null;
+  if (def.needCode) {
+    const pair = await Promise.all([buildSnapshot(code).catch(() => null), buildExtra(code).catch(() => null)]);
+    snap = compactSrv(pair[0]); extra = pair[1];
+    if (extra) { delete extra.notes; }
+  }
+  if (def.screen) screen = await buildScreen().catch(() => null);
+  const nm = (snap && snap.name) || (body.name || "").toString() || "";
+  const label = nm ? (nm + "（" + code + "）") : code;
+  const watchTxt = watchlist.map((s) => (s.n ? s.n + "（" + s.c + "）" : s.c)).join("、");
+
+  const userMsg = def.tpl({ label, code, arg, context, snap, extra, screen, watchTxt: (def.needWatch || cmdName === "morning-note") ? (watchTxt || "（無自選股）") : "" });
+
+  const payload = {
+    model: ANTHROPIC_MODEL,
+    max_tokens: def.tokens,
+    system: RESEARCH_SYS,
+    messages: [{ role: "user", content: userMsg }]
+  };
+  if (def.web) payload.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: def.web }];
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = (data && data.error && data.error.message) || ("Anthropic " + res.status);
+    throw new Error(msg);
+  }
+  const text = Array.isArray(data.content)
+    ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n\n").trim()
+    : "";
+  return { text, command: cmdName, model: ANTHROPIC_MODEL, usage: data.usage || null };
 }
 
 // ---- 呼叫 Claude 做分析 ----
@@ -592,6 +687,27 @@ export default {
         return json(await buildExtra(code));
       }
 
+      if (url.pathname === "/api/command" && request.method === "POST") {
+        if (!env.ANTHROPIC_API_KEY) return json({ error: "伺服器尚未設定 ANTHROPIC_API_KEY 密鑰" }, 500);
+        const body = await request.json().catch(() => ({}));
+        return json(await runCommand(env, body));
+      }
+
+      if (url.pathname === "/api/debug") {
+        const ds = url.searchParams.get("ds") || "";
+        const dcode = (url.searchParams.get("code") || "2330").toUpperCase();
+        const MAPD = {
+          margn: "https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN",
+          qfiis: "https://openapi.twse.com.tw/v1/fund/MI_QFIIS",
+          fin: "https://openapi.twse.com.tw/v1/opendata/t187ap14_L"
+        };
+        if (!MAPD[ds]) return json({ error: "ds must be margn|qfiis|fin" }, 400);
+        const j = await twFetch(MAPD[ds], 60).catch(() => null);
+        if (!Array.isArray(j)) return json({ error: "fetch failed", type: typeof j });
+        const row = j.find((x) => codeOf(x) === dcode) || null;
+        return json({ keys: j[0] ? Object.keys(j[0]) : [], sample: row });
+      }
+
       if (url.pathname === "/api/analyze" && request.method === "POST") {
         if (!env.ANTHROPIC_API_KEY) return json({ error: "伺服器尚未設定 ANTHROPIC_API_KEY 密鑰" }, 500);
         const body = await request.json().catch(() => ({}));
@@ -605,7 +721,7 @@ export default {
       }
 
       if (url.pathname === "/" || url.pathname === "/api") {
-        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/screen", "POST /api/analyze", "POST /api/news"] });
+        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/screen", "POST /api/analyze", "POST /api/news", "POST /api/command"] });
       }
       return json({ error: "Not found" }, 404);
     } catch (e) {
