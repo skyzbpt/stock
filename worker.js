@@ -20,7 +20,7 @@ const ANALYSIS_MAX_TOKENS = 1600;
 const UA = "Mozilla/5.0 (compatible; TaiguSkyline/1.0; +https://github.com/)";
 
 // 部署後改成你的前端網域可提升安全性；開發階段用 "*" 允許全部
-const ALLOW_ORIGIN = "*";
+const ALLOW_ORIGIN = "https://skyzbpt.github.io";
 
 // ---- 共用工具 ----
 function corsHeaders() {
