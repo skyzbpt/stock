@@ -1,9 +1,18 @@
 /**
  * 台股天際線 · 後端 Worker (Cloudflare Workers)
  * ------------------------------------------------------------------
- * 兩個路由：
- *   GET  /api/stock?code=2330   → 直接抓證交所公開資料，整理成精簡 JSON（秒讀）
- *   POST /api/analyze           → 用你抓到的數據，呼叫 Claude 做「一次到位」的精準分析
+ * 路由：
+ *   GET  /api/stock?code=2330   → 行情＋估值＋三大法人＋近兩月走勢（秒讀）
+ *   GET  /api/extra?code=2330   → 基本面與籌碼：月營收、季 EPS、股利、融資融券、外資持股、重大訊息、大盤
+ *   GET  /api/screen            → 全市場掃描（市場雷達五份榜單）
+ *   GET  /api/debug             → 逐一檢查每個證交所資料源是否正常（部署後先打這支確認）
+ *   POST /api/analyze | /api/news | /api/command → 呼叫 Claude
+ *
+ * 證交所資料來源：
+ *   - OpenAPI（openapi.twse.com.tw/v1）：每日收盤、估值、月營收、EPS、股利、融資融券、重大訊息、大盤
+ *   - 證交所網站 RWD 端點（www.twse.com.tw/rwd/zh）：OpenAPI 沒提供的「三大法人 T86」「外資持股 MI_QFIIS」
+ *     與「個股日成交 STOCK_DAY」。這組端點有頻率限制（約每 5 秒 3 次），所以全部加了快取與交易日回推。
+ *   - 即時行情（mis.twse.com.tw）：盤中約 5 秒延遲的快照
  *
  * 為什麼要有這個後端：
  *   1. 證交所 API 從瀏覽器直接打會有 CORS 問題；從 Worker（伺服器端）打沒有這個限制，還能快取。
@@ -62,14 +71,149 @@ function rocToISO(d) {
   return y + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
 }
 
+// ---- 台灣時間（Worker 跑在 UTC，交易日要用 UTC+8 判斷）----
+function twNow() { return new Date(Date.now() + 8 * 3600 * 1000); }
+function ymdOf(d) {
+  return d.getUTCFullYear() + String(d.getUTCMonth() + 1).padStart(2, "0") + String(d.getUTCDate()).padStart(2, "0");
+}
+
+// ---- 同一個 Worker 實例內的記憶體快取（合併同時發出的請求，也減少打到證交所的次數）----
+const MEMO = new Map();
+function memo(key, ttlSec, fn) {
+  const now = Date.now(), hit = MEMO.get(key);
+  if (hit && hit.exp > now) return hit.p;
+  if (MEMO.size > 400) for (const [k, v] of MEMO) if (v.exp <= now) MEMO.delete(k);
+  const p = Promise.resolve().then(fn);
+  MEMO.set(key, { p, exp: now + ttlSec * 1000 });
+  const drop = () => { const cur = MEMO.get(key); if (cur && cur.p === p) MEMO.delete(key); };
+  p.then((v) => { if (v == null) drop(); }, drop);
+  return p;
+}
+
 // ---- 抓證交所資料（伺服器端 + Cloudflare 邊緣快取）----
-async function twFetch(u, ttl) {
-  const res = await fetch(u, {
-    headers: { "User-Agent": UA, "Accept": "application/json" },
-    cf: { cacheTtl: ttl || 600, cacheEverything: true }
+const FETCH_TIMEOUT_MS = 12000;
+// www.twse.com.tw 約每 5 秒 3 次就可能暫時封鎖 IP：同一實例內把請求錯開，避免冷快取時一次爆量
+const WWW_GAP_MS = 450;
+let wwwNext = 0;
+async function wwwSlot() {
+  const now = Date.now(), at = Math.max(now, wwwNext);
+  wwwNext = at + WWW_GAP_MS;
+  if (at > now) await new Promise((r) => setTimeout(r, at - now));
+}
+function twFetch(u, ttl) {
+  return memo(u, ttl || 600, async () => {
+    if (u.indexOf("https://www.twse.com.tw/") === 0) await wwwSlot();
+    const res = await fetch(u, {
+      headers: { "User-Agent": UA, "Accept": "application/json" },
+      cf: { cacheTtl: ttl || 600, cacheEverything: true },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
+    if (!res.ok) throw new Error("TWSE " + res.status + " " + new URL(u).pathname);
+    // 被限流時證交所會回 HTML 而不是 JSON
+    return res.json().catch(() => { throw new Error("TWSE 回傳非 JSON（可能被限流）" + new URL(u).pathname); });
   });
-  if (!res.ok) throw new Error("TWSE " + res.status);
-  return res.json();
+}
+
+// OpenAPI 資料集（https://openapi.twse.com.tw/ 的 swagger 有完整清單）
+const OPENAPI = {
+  dayAll: "exchangeReport/STOCK_DAY_ALL",   // 上市個股日成交資訊
+  bwibbu: "exchangeReport/BWIBBU_ALL",      // 本益比、殖利率、股價淨值比
+  basic:  "opendata/t187ap03_L",            // 上市公司基本資料
+  rev:    "opendata/t187ap05_L",            // 每月營業收入彙總表
+  fin:    "opendata/t187ap14_L",            // 各產業 EPS 統計資訊（季）
+  div:    "opendata/t187ap45_L",            // 股利分派情形
+  margn:  "exchangeReport/MI_MARGN",        // 融資融券餘額
+  qfii20: "fund/MI_QFIIS_sort_20",          // 外資持股前 20 名（完整名單走 RWD）
+  news:   "opendata/t187ap04_L",            // 每日重大訊息
+  mkt:    "exchangeReport/FMTQIK"           // 每日市場成交資訊（含加權指數）
+};
+function oa(key, ttl) { return twFetch("https://openapi.twse.com.tw/v1/" + OPENAPI[key], ttl); }
+
+// ---- 證交所網站 RWD 端點：回傳 { date, fields, data }；查無資料回 null，連線失敗會丟錯 ----
+async function twseRwd(path, params, ttl) {
+  const q = Object.keys(params).map((k) => k + "=" + encodeURIComponent(params[k])).join("&");
+  const j = await twFetch("https://www.twse.com.tw/rwd/zh/" + path + "?" + q + "&response=json", ttl);
+  if (!j || j.stat !== "OK") return null;
+  let fields = j.fields, data = j.data;
+  if ((!Array.isArray(data) || !data.length) && Array.isArray(j.tables)) {
+    const t = j.tables.find((t) => Array.isArray(t.fields) && Array.isArray(t.data) && t.data.length);
+    if (t) { fields = t.fields; data = t.data; }
+  }
+  if (!Array.isArray(fields) || !Array.isArray(data) || !data.length) return null;
+  return { date: j.date ? anyDateToISO(j.date) : null, fields: fields.map((f) => String(f).trim()), data };
+}
+
+// 盤後資料約 15:00 後公布：從最近一個交易日往回找（跳過週末；遇連假多試幾天）
+async function twseLatest(path, params) {
+  const now = twNow(), today = ymdOf(now);
+  const d = new Date(now.getTime());
+  if (now.getUTCHours() < 15) d.setUTCDate(d.getUTCDate() - 1);
+  for (let tries = 0, guard = 0; tries < 5 && guard < 12; guard++, d.setUTCDate(d.getUTCDate() - 1)) {
+    const dow = d.getUTCDay();
+    if (dow === 0 || dow === 6) continue;
+    const ymd = ymdOf(d);
+    let r;
+    try { r = await twseRwd(path, Object.assign({ date: ymd }, params), ymd === today ? 300 : 43200); }
+    catch (e) { return null; } // 連線失敗或被限流就停，不要繼續狂打
+    if (r) return Object.assign(r, { date: r.date || anyDateToISO(ymd) });
+    tries++;
+  }
+  return null;
+}
+function colIdx(fields, test) { return fields.findIndex(test); }
+const has = (s) => (h) => h.indexOf(s) !== -1;
+
+// ---- 三大法人買賣超日報（T86）。OpenAPI 沒有這份資料，改走 RWD 端點 ----
+function fetchT86() {
+  return memo("T86", 600, async () => {
+    const r = await twseLatest("fund/T86", { selectType: "ALLBUT0999" });
+    if (!r) return null;
+    const f = r.fields;
+    const iCode = colIdx(f, has("證券代號"));
+    const iForeign = colIdx(f, has("外陸資買賣超"));          // 外資及陸資（不含外資自營商）
+    const iForeignDealer = colIdx(f, has("外資自營商買賣超"));
+    const iTrust = colIdx(f, has("投信買賣超"));
+    const iDealer = colIdx(f, (h) => h === "自營商買賣超股數");  // 自營商合計（自行買賣＋避險）
+    const iDealerSelf = colIdx(f, (h) => h.indexOf("自營商買賣超股數(自行買賣)") === 0);
+    const iDealerHedge = colIdx(f, (h) => h.indexOf("自營商買賣超股數(避險)") === 0);
+    const iTotal = colIdx(f, has("三大法人買賣超"));
+    if (iCode < 0) return null;
+    const at = (row, i) => (i < 0 ? null : num(row[i]));
+    const lots = (v) => (v == null ? null : Math.round(v / 1000));
+    const byCode = {};
+    for (const row of r.data) {
+      const code = String(row[iCode] || "").trim();
+      if (!code) continue;
+      const fx = at(row, iForeign), fd = at(row, iForeignDealer), tr = at(row, iTrust);
+      let dl = at(row, iDealer);
+      if (dl == null && (iDealerSelf >= 0 || iDealerHedge >= 0)) dl = (at(row, iDealerSelf) || 0) + (at(row, iDealerHedge) || 0);
+      const foreign = (fx == null && fd == null) ? null : (fx || 0) + (fd || 0);
+      let total = at(row, iTotal);
+      if (total == null && (foreign != null || tr != null || dl != null)) total = (foreign || 0) + (tr || 0) + (dl || 0);
+      byCode[code] = { foreignLots: lots(foreign), trustLots: lots(tr), dealerLots: lots(dl), totalLots: lots(total) };
+    }
+    return { date: r.date, byCode };
+  });
+}
+
+// ---- 外資及陸資持股（MI_QFIIS 全部個股）。OpenAPI 只有前 20 名，完整名單走 RWD ----
+function fetchQFIIS() {
+  return memo("QFIIS", 1800, async () => {
+    const r = await twseLatest("fund/MI_QFIIS", { selectType: "ALLBUT0999" });
+    if (!r) return null;
+    const f = r.fields;
+    const iCode = colIdx(f, has("證券代號"));
+    let iPct = colIdx(f, has("全體外資及陸資持股比率"));
+    if (iPct < 0) iPct = colIdx(f, (h) => h.indexOf("持股比率") !== -1 && h.indexOf("尚可") === -1);
+    const iLimit = colIdx(f, has("共用法令投資上限比率"));
+    if (iCode < 0 || iPct < 0) return null;
+    const byCode = {};
+    for (const row of r.data) {
+      const code = String(row[iCode] || "").trim();
+      if (code) byCode[code] = { holdingPct: num(row[iPct]), limitPct: iLimit < 0 ? null : num(row[iLimit]) };
+    }
+    return { date: r.date, byCode };
+  });
 }
 
 // ---- 盤中／當日即時快照（TWSE MIS，約 5 秒延遲）----
@@ -92,14 +236,21 @@ async function fetchRealtime(code) {
       const j = await res.json().catch(() => null);
       const m = j && Array.isArray(j.msgArray) && j.msgArray[0];
       if (!m || !m.c) continue;
-      const z = num(m.z), y = num(m.y);
+      const y = num(m.y);
+      let z = num(m.z), approx = false;
+      // 這 5 秒內剛好沒成交時 z 會是 "-"：開盤後改用最佳買價（沒有就最佳賣價）暫代
+      if (z == null && num(m.o) != null) {
+        const first = (s) => num(String(s || "").split("_")[0]);
+        z = first(m.b);
+        if (z == null) z = first(m.a);
+        approx = z != null;
+      }
       if (z == null) continue; // 尚無當盤成交（如未開盤），交給收盤資料處理
-      const d = String(m.d || "");
-      const iso = /^\d{8}$/.test(d) ? d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6, 8) : null;
+      const iso = anyDateToISO(m.d) || null;
       return {
         name: m.n || null,
         market: m.ex === "otc" ? "上櫃 (TPEx)" : "上市 (TWSE)",
-        date: iso, time: m.t || null,
+        date: /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null, time: m.t || null, approx,
         close: z, open: num(m.o), high: num(m.h), low: num(m.l),
         prevClose: y,
         change: y != null ? +(z - y).toFixed(2) : null,
@@ -113,26 +264,30 @@ async function fetchRealtime(code) {
 
 async function fetchHistory(code) {
   // 抓「上月 + 當月」個股日成交，取收盤序列（給走勢圖與技術分析用）
-  const now = new Date();
-  const ym = (dt) => dt.getFullYear() + String(dt.getMonth() + 1).padStart(2, "0") + "01";
-  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const urls = [
-    "https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=" + ym(prev) + "&stockNo=" + code,
-    "https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=" + ym(now) + "&stockNo=" + code
+  const now = twNow();
+  const months = [
+    { ymd: ymdOf(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))), ttl: 43200 }, // 上月已定案，快取久一點
+    { ymd: ymdOf(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))), ttl: 1800 }
   ];
   let rows = [];
-  for (const u of urls) {
-    try {
-      const j = await twFetch(u, 1800);
-      if (j && j.stat === "OK" && Array.isArray(j.data)) {
-        for (const r of j.data) {
-          // r: [日期, 成交股數, 成交金額, 開盤, 最高, 最低, 收盤, 漲跌價差, 成交筆數]
-          const close = num(r[6]);
-          const vol = num(r[1]);
-          if (close != null) rows.push({ date: rocToISO(r[0]), close, volumeLots: vol != null ? Math.round(vol / 1000) : null });
-        }
-      }
-    } catch (e) { /* 略過單月失敗 */ }
+  for (const m of months) {
+    let r = null;
+    try { r = await twseRwd("afterTrading/STOCK_DAY", { date: m.ymd, stockNo: code }, m.ttl); }
+    catch (e) {
+      // 被限流或逾時就停，不要再多打；只有 4xx（網址改版）才退回舊版網址
+      if (!/^TWSE 4\d\d/.test(String(e && e.message))) break;
+      try {
+        const j = await twFetch("https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=" + m.ymd + "&stockNo=" + code, m.ttl);
+        if (j && j.stat === "OK" && Array.isArray(j.data)) r = { data: j.data };
+      } catch (e2) { /* 略過單月失敗 */ }
+    }
+    if (!r) continue;
+    for (const d of r.data) {
+      // d: [日期, 成交股數, 成交金額, 開盤, 最高, 最低, 收盤, 漲跌價差, 成交筆數]
+      const close = num(d[6]);
+      const vol = num(d[1]);
+      if (close != null) rows.push({ date: rocToISO(d[0]), close, volumeLots: vol != null ? Math.round(vol / 1000) : null });
+    }
   }
   const seen = {};
   rows = rows.filter((x) => (seen[x.date] ? false : (seen[x.date] = 1)));
@@ -141,17 +296,17 @@ async function fetchHistory(code) {
 
 async function buildSnapshot(code) {
   const [dayAll, bwibbu, t86, hist, rt] = await Promise.all([
-    twFetch("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", 600).catch(() => null),
-    twFetch("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL", 600).catch(() => null),
-    twFetch("https://openapi.twse.com.tw/v1/fund/T86", 600).catch(() => null),
+    oa("dayAll", 600).catch(() => null),
+    oa("bwibbu", 600).catch(() => null),
+    fetchT86().catch(() => null),
     fetchHistory(code).catch(() => null),
     fetchRealtime(code).catch(() => null)
   ]);
 
   const snap = {
     code, name: null, market: "上市 (TWSE)", asOf: new Date().toISOString(),
-    source: "臺灣證券交易所 OpenAPI", price: null, valuation: null,
-    institutional: null, history: null, notes: []
+    source: "臺灣證券交易所 OpenAPI", price: null, priceDate: null, priceLabel: null, priceTime: null,
+    valuation: null, institutional: null, history: null, notes: []
   };
 
   // 收盤行情
@@ -168,6 +323,8 @@ async function buildSnapshot(code) {
         volumeLots: vol != null ? Math.round(vol / 1000) : null,
         tradeValue: num(row.TradeValue), transactions: num(row.Transaction)
       };
+      if (row.Date) snap.priceDate = anyDateToISO(row.Date);
+      snap.priceLabel = "收盤";
     }
   }
   // 盤中／當日即時快照優先（解決全市場收盤檔更新延遲的問題）
@@ -184,8 +341,10 @@ async function buildSnapshot(code) {
       transactions: sameDay && base.transactions != null ? base.transactions : null
     };
     snap.priceDate = rt.date;
+    snap.priceTime = rt.time;
     snap.priceLabel = rt.time === "13:30:00" ? "收盤" : "盤中即時";
     snap.source = "臺灣證券交易所 OpenAPI ＋ 即時行情快照";
+    if (rt.approx) snap.notes.push("最近 5 秒內沒有成交，現價暫以最佳買價（或賣價）顯示。");
   }
 
   if (!snap.price) snap.notes.push("查無此代號的上市每日收盤資料（可能為上櫃／興櫃，或當日非交易日）。");
@@ -203,25 +362,17 @@ async function buildSnapshot(code) {
     }
   }
 
-  // 三大法人買賣超（單位：張＝股數/1000；正為買超、負為賣超）
-  if (Array.isArray(t86)) {
-    const row = t86.find((r) => (r.Code || r["證券代號"]) === code);
-    if (row) {
-      snap.name = snap.name || row.Name || row["證券名稱"];
-      const toLots = (v) => (v == null ? null : Math.round(v / 1000));
-      const foreign = num(pick(row, ["外陸資買賣超股數(不含外資自營商)", "外資買賣超股數", "外資及陸資", "Foreign"]));
-      const trust   = num(pick(row, ["投信買賣超股數", "投信", "Investment Trust", "InvestmentTrust"]));
-      const dealer  = num(pick(row, ["自營商買賣超股數", "自營商", "Dealer"]));
-      const total   = num(pick(row, ["三大法人買賣超股數", "Total"]));
-      snap.institutional = {
-        unit: "張",
-        foreignLots: toLots(foreign),
-        trustLots: toLots(trust),
-        dealerLots: toLots(dealer),
-        totalLots: total != null ? toLots(total)
-          : ((foreign || trust || dealer) != null ? toLots((foreign || 0) + (trust || 0) + (dealer || 0)) : null)
-      };
-    }
+  // 三大法人買賣超（單位：張＝股數/1000；正為買超、負為賣超；外資含外資自營商）
+  if (t86 && t86.byCode[code]) {
+    snap.institutional = Object.assign({ unit: "張", date: t86.date }, t86.byCode[code]);
+  } else {
+    snap.notes.push(t86 ? "最近交易日三大法人資料中查無此代號。" : "三大法人資料暫時無法取得（證交所尚未公布或連線受限）。");
+  }
+
+  // 盤中／今日即時價還沒進日成交檔：補到走勢最後一點，讓走勢圖與技術面看到今天
+  if (hist && rt && rt.date && rt.close != null) {
+    const last = hist[hist.length - 1];
+    if (!last || last.date < rt.date) hist.push({ date: rt.date, close: rt.close, volumeLots: rt.volumeLots, live: true });
   }
 
   // 歷史走勢（若每日收盤缺，用歷史最後一筆補價格）
@@ -249,6 +400,7 @@ async function buildSnapshot(code) {
         changePct: prev ? +((last.close - prev.close) / prev.close * 100).toFixed(2) : null,
         open: null, high: null, low: null, volumeLots: last.volumeLots, tradeValue: null, transactions: null
       };
+      snap.priceDate = last.date; snap.priceLabel = "收盤";
       snap.notes.push("即時每日資料不足，價格改用月成交歷史推算。");
     }
   }
@@ -270,22 +422,19 @@ function anyDateToISO(d) {
 function codeOf(r) { return String(r.Code || r["公司代號"] || r["證券代號"] || r["股票代號"] || "").trim(); }
 
 async function buildExtra(code) {
-  const [basic, rev, fin, div, margn, qfiis, news, mkt] = await Promise.all([
-    twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap03_L", 3600).catch(() => null),
-    twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap05_L", 3600).catch(() => null),
-    twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap14_L", 3600).catch(() => null),
-    twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap45_L", 3600).catch(() => null),
-    twFetch("https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN", 1800).catch(() => null),
-    (async () => {
-      const a = await twFetch("https://openapi.twse.com.tw/v1/fund/MI_QFIIS", 1800).catch(() => null);
-      if (Array.isArray(a) && a.length) return a;
-      return twFetch("https://openapi.twse.com.tw/v1/fund/MI_QFIIS_sort_20", 1800).catch(() => null);
-    })(),
-    twFetch("https://openapi.twse.com.tw/v1/opendata/t187ap04_L", 600).catch(() => null),
-    twFetch("https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK", 1800).catch(() => null)
+  const [basic, rev, fin, div, margn, qfiis, qfii20, news, mkt] = await Promise.all([
+    oa("basic", 3600).catch(() => null),
+    oa("rev", 3600).catch(() => null),
+    oa("fin", 3600).catch(() => null),
+    oa("div", 3600).catch(() => null),
+    oa("margn", 1800).catch(() => null),
+    fetchQFIIS().catch(() => null),
+    oa("qfii20", 1800).catch(() => null),
+    oa("news", 600).catch(() => null),
+    oa("mkt", 1800).catch(() => null)
   ]);
   const out = { code, asOf: new Date().toISOString(),
-    source: "臺灣證券交易所 OpenAPI（基本資料／月營收／季報／股利／信用交易／外資持股／重大訊息／大盤）",
+    source: "臺灣證券交易所 OpenAPI（基本資料／月營收／季報／股利／信用交易／重大訊息／大盤）＋ 證交所外資持股統計",
     profile: null, monthlyRevenue: null, quarterly: null, dividend: null,
     margin: null, foreign: null, announcements: null, marketIndex: null, notes: [] };
 
@@ -329,12 +478,14 @@ async function buildExtra(code) {
     if (r) {
       const rv = num(pick(r, ["營業收入"]));
       const gp = num(pick(r, ["營業毛利"]));
+      const op = num(pick(r, ["營業利益"]));
       const ni = num(pick(r, ["本期淨利", "本期稅後淨利", "稅後淨利", "本期損益", "淨利"]));
       out.quarterly = {
         period: (String(pick(r, ["年度"]) || "").trim() + " Q" + String(pick(r, ["季別"]) || "").trim()).trim(),
         eps: num(pick(r, ["基本每股盈餘"])),
         revenueB: rv != null ? +(rv / 1e5).toFixed(1) : null,
         grossMarginPct: (rv && gp != null) ? +(gp / rv * 100).toFixed(2) : null,
+        operatingMarginPct: (rv && op != null) ? +(op / rv * 100).toFixed(2) : null,
         netMarginPct: (rv && ni != null) ? +(ni / rv * 100).toFixed(2) : null,
         netIncomeB: ni != null ? +(ni / 1e5).toFixed(1) : null
       };
@@ -342,7 +493,10 @@ async function buildExtra(code) {
   }
   // 股利分派（現金＝盈餘＋公積；股票＝盈餘轉增資＋公積轉增資，單位 元/股）
   if (Array.isArray(div)) {
-    const rows = div.filter((x) => codeOf(x) === code);
+    // 同一家公司可能有多筆（年度／季配），取股利年度＋期別最新的一筆
+    const rows = div.filter((x) => codeOf(x) === code).sort((a, b) =>
+      ((num(pick(a, ["股利年度"])) || 0) * 10 + (num(pick(a, ["期別"])) || 0)) -
+      ((num(pick(b, ["股利年度"])) || 0) * 10 + (num(pick(b, ["期別"])) || 0)));
     const r = rows.length ? rows[rows.length - 1] : null;
     if (r) {
       const c1 = num(pick(r, ["盈餘分配之現金股利"]));
@@ -371,11 +525,14 @@ async function buildExtra(code) {
       };
     }
   }
-  // 外資及陸資持股比率（%）
-  if (Array.isArray(qfiis)) {
-    const r = qfiis.find((x) => codeOf(x) === code);
+  // 外資及陸資持股比率（%）：完整名單優先，抓不到再看 OpenAPI 前 20 名
+  if (qfiis && qfiis.byCode[code]) {
+    out.foreign = Object.assign({ date: qfiis.date }, qfiis.byCode[code]);
+  } else if (Array.isArray(qfii20)) {
+    const r = qfii20.find((x) => codeOf(x) === code);
     if (r) out.foreign = { holdingPct: num(pick(r, ["全體外資及陸資持股比率", "外資及陸資持股比率", "持股比率", "Shareholding"])) };
   }
+  if (!out.foreign && !qfiis) out.notes.push("外資持股資料暫時無法取得（證交所尚未公布或連線受限）。");
   // 當日重大訊息（最多 3 則）
   if (Array.isArray(news)) {
     const rows = news.filter((x) => codeOf(x) === code);
@@ -401,9 +558,9 @@ async function buildExtra(code) {
 // ---- 全市場掃描（市場雷達）----
 async function buildScreen() {
   const [dayAll, bwibbu, t86] = await Promise.all([
-    twFetch("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", 600).catch(() => null),
-    twFetch("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL", 600).catch(() => null),
-    twFetch("https://openapi.twse.com.tw/v1/fund/T86", 600).catch(() => null)
+    oa("dayAll", 600).catch(() => null),
+    oa("bwibbu", 600).catch(() => null),
+    fetchT86().catch(() => null)
   ]);
 
   const byCode = {};
@@ -425,11 +582,12 @@ async function buildScreen() {
     it.yield = num(pick(r, ["DividendYield", "殖利率"]));
     it.pb = num(pick(r, ["PBratio", "股價淨值比", "淨值比"]));
   }
-  if (Array.isArray(t86)) for (const r of t86) {
-    const code = r.Code || r["證券代號"]; const it = byCode[code]; if (!it) continue;
-    const total = num(pick(r, ["三大法人買賣超股數", "Total"]));
-    if (total != null) it.instLots = Math.round(total / 1000);
+  if (t86) for (const code in t86.byCode) {
+    const it = byCode[code]; if (!it) continue;
+    it.instLots = t86.byCode[code].totalLots;
   }
+  let dataDate = null;
+  if (Array.isArray(dayAll) && dayAll[0] && dayAll[0].Date) dataDate = anyDateToISO(dayAll[0].Date);
 
   const all = Object.values(byCode).filter((x) => x.close != null);
   let up = 0, down = 0, flat = 0;
@@ -441,7 +599,8 @@ async function buildScreen() {
 
   return {
     asOf: new Date().toISOString(),
-    source: "臺灣證券交易所 OpenAPI（上市）",
+    source: "臺灣證券交易所 OpenAPI（上市）＋ 三大法人買賣超日報",
+    dataDate, instDate: t86 ? t86.date : null,
     breadth: { up, down, flat, listed: all.length },
     lists: {
       // 三大法人合計買超最多
@@ -595,7 +754,8 @@ async function analyze(env, body) {
     userMsg =
       "股票：" + (name ? (name + "（" + code + "）") : code) + "\n" +
       "分析角度：" + focus + "\n\n" +
-      "以下是剛抓取的證交所資料（JSON）：\n```json\n" + JSON.stringify(snapshot, null, 2) + "\n```\n\n" +
+      "以下是剛抓取的證交所資料（JSON）。price／valuation／institutional／history 為行情、估值、三大法人與走勢；" +
+      "extra（若有）為月營收、最新季 EPS、股利、融資融券、外資持股、重大訊息與大盤：\n```json\n" + JSON.stringify(snapshot, null, 2) + "\n```\n\n" +
       "請根據上面的數據，產出精簡、精準的分析。";
   }
 
@@ -668,6 +828,62 @@ async function newsDigest(env, body) {
   return { text, model: ANTHROPIC_MODEL };
 }
 
+// ---- 資料源健康檢查（/api/debug）----
+const RWD_SOURCES = { t86: fetchT86, qfiis: fetchQFIIS };
+
+async function sourceStatus(code) {
+  const timed = async (name, fn) => {
+    const t0 = Date.now();
+    try {
+      const info = await fn();
+      return Object.assign({ name, ok: !!(info && info.ok !== false) }, info, { ms: Date.now() - t0 });
+    } catch (e) {
+      return { name, ok: false, error: String((e && e.message) || e), ms: Date.now() - t0 };
+    }
+  };
+  const checks = Object.keys(OPENAPI).map((k) => timed("openapi:" + k, async () => {
+    const j = await oa(k, 600);
+    if (!Array.isArray(j)) return { ok: false, error: "回傳格式不是陣列" };
+    const r0 = j[0] || {};
+    // 重大訊息當天沒有公告時本來就可能是空陣列
+    return { ok: j.length > 0 || k === "news", rows: j.length, date: r0.Date ? anyDateToISO(r0.Date) : (r0["出表日期"] ? anyDateToISO(r0["出表日期"]) : null) };
+  }));
+  for (const k of Object.keys(RWD_SOURCES)) checks.push(timed("rwd:" + k, async () => {
+    const r = await RWD_SOURCES[k]();
+    if (!r) return { ok: false, error: "近 5 個交易日都查無資料，或連線受限" };
+    return { rows: Object.keys(r.byCode).length, date: r.date, hasCode: !!r.byCode[code] };
+  }));
+  checks.push(timed("rwd:stockDay(" + code + ")", async () => {
+    const h = await fetchHistory(code);
+    return { ok: h.length > 0, rows: h.length, date: h.length ? h[h.length - 1].date : null };
+  }));
+  checks.push(timed("mis:realtime(" + code + ")", async () => {
+    const rt = await fetchRealtime(code);
+    // 盤前／休市沒有即時成交是正常的，不算失敗
+    return rt ? { date: rt.date, time: rt.time, close: rt.close } : { ok: true, note: "目前沒有當盤成交（盤前或休市屬正常）" };
+  }));
+  const sources = await Promise.all(checks);
+  return { ok: sources.every((s) => s.ok), code, checkedAt: new Date().toISOString(), sources };
+}
+
+// /api/debug?ds=t86&code=2330 → 看欄位名稱與該代號那一列原始資料（欄位改版時用）
+async function sourceSample(ds, code) {
+  if (OPENAPI[ds]) {
+    const j = await oa(ds, 60);
+    if (!Array.isArray(j)) return { error: "fetch failed", type: typeof j };
+    return { ds, rows: j.length, keys: j[0] ? Object.keys(j[0]) : [], sample: j.find((x) => codeOf(x) === code) || null };
+  }
+  if (ds === "t86" || ds === "qfiis") {
+    const r = await twseLatest(ds === "t86" ? "fund/T86" : "fund/MI_QFIIS", { selectType: "ALLBUT0999" });
+    if (!r) return { ds, error: "近 5 個交易日都查無資料，或連線受限" };
+    return { ds, date: r.date, rows: r.data.length, fields: r.fields,
+      sample: r.data.find((row) => String(row[0] || "").trim() === code) || null, parsed: (await RWD_SOURCES[ds]() || { byCode: {} }).byCode[code] || null };
+  }
+  if (ds === "stockDay") return { ds, history: await fetchHistory(code) };
+  if (ds === "realtime") return { ds, realtime: await fetchRealtime(code) };
+  return { error: "ds 可用值：" + Object.keys(OPENAPI).concat(["t86", "qfiis", "stockDay", "realtime"]).join("|") };
+}
+
 // ---- 路由 ----
 export default {
   async fetch(request, env) {
@@ -699,17 +915,10 @@ export default {
 
       if (url.pathname === "/api/debug") {
         const ds = url.searchParams.get("ds") || "";
-        const dcode = (url.searchParams.get("code") || "2330").toUpperCase();
-        const MAPD = {
-          margn: "https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN",
-          qfiis: "https://openapi.twse.com.tw/v1/fund/MI_QFIIS",
-          fin: "https://openapi.twse.com.tw/v1/opendata/t187ap14_L"
-        };
-        if (!MAPD[ds]) return json({ error: "ds must be margn|qfiis|fin" }, 400);
-        const j = await twFetch(MAPD[ds], 60).catch(() => null);
-        if (!Array.isArray(j)) return json({ error: "fetch failed", type: typeof j });
-        const row = j.find((x) => codeOf(x) === dcode) || null;
-        return json({ keys: j[0] ? Object.keys(j[0]) : [], sample: row });
+        const dcode = (url.searchParams.get("code") || "2330").trim().toUpperCase();
+        if (!/^\d{4,6}[A-Z]?$/.test(dcode)) return json({ error: "請提供有效的股票代號（例如 2330）" }, 400);
+        if (!ds) return json(await sourceStatus(dcode));
+        return json(await sourceSample(ds, dcode));
       }
 
       if (url.pathname === "/api/analyze" && request.method === "POST") {
@@ -725,7 +934,7 @@ export default {
       }
 
       if (url.pathname === "/" || url.pathname === "/api") {
-        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/screen", "POST /api/analyze", "POST /api/news", "POST /api/command"] });
+        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/screen", "GET /api/debug[?ds=t86&code=2330]", "POST /api/analyze", "POST /api/news", "POST /api/command"] });
       }
       return json({ error: "Not found" }, 404);
     } catch (e) {

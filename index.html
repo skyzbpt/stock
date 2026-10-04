@@ -166,6 +166,18 @@
   .inst-item .v{font-family:var(--font-disp);font-size:15px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;}
   .note{font-size:12.5px;color:#92400E;background:#FEF7EC;border:1px solid #F6E3C0;border-radius:9px;padding:8px 11px;margin-top:10px;}
 
+  /* ---------- 基本面・籌碼（/api/extra）---------- */
+  .ex-card{margin-top:14px;}
+  .ex-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px;}
+  .ex-mkt{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .ex-mkt b{font-family:var(--font-disp);color:var(--ink);font-weight:600;}
+  .cell .s{font-size:11.5px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums;}
+  .ann{list-style:none;margin:0;padding:0;}
+  .ann li{font-size:13.5px;color:var(--ink);padding:5px 0;border-top:1px dashed var(--line-soft);display:flex;gap:10px;}
+  .ann li:first-child{border-top:none;padding-top:0;}
+  .ann .d{font-family:var(--font-disp);font-size:12px;color:var(--faint);flex:0 0 auto;padding-top:1px;}
+  .data-date{font-size:12px;color:var(--faint);margin-top:8px;}
+
   /* skeleton */
   .skel{background:var(--white);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:20px 22px;}
   .sk{background:linear-gradient(90deg,var(--mist) 25%,var(--mist-2) 50%,var(--mist) 75%);background-size:200% 100%;
@@ -263,7 +275,7 @@
       <input id="workerUrl" class="cfg-input" type="text" placeholder="https://你的-worker.workers.dev" autocomplete="off" spellcheck="false" />
       <button id="saveWorker" class="btn-sm primary">儲存</button>
       <button id="testWorker" class="btn-sm ghost">測試連線</button>
-      <div class="cfg-hint">貼上你部署好的 Cloudflare Worker 網址（不含結尾斜線）。程式會呼叫 <code>/api/stock</code> 與 <code>/api/analyze</code>。</div>
+      <div class="cfg-hint">貼上你部署好的 Cloudflare Worker 網址（不含結尾斜線）。程式會呼叫 <code>/api/stock</code>、<code>/api/extra</code> 與 <code>/api/analyze</code>；證交所資料源是否正常可直接開 <code>/api/debug</code> 檢查。</div>
     </div>
   </details>
 
@@ -351,6 +363,7 @@
 
   <section class="result" id="result" aria-live="polite">
     <div id="statCard"></div>
+    <div id="extraCard"></div>
     <div class="an-wrap" id="anWrap" style="display:none;">
       <div class="an-head">
         <span class="an-title">AI 分析</span>
@@ -374,7 +387,7 @@
   </section>
 
   <footer class="foot">
-    資料來源 · 臺灣證券交易所 OpenAPI（每日收盤／估值／三大法人）與個股歷史成交<br/>
+    資料來源 · 臺灣證券交易所 OpenAPI（收盤／估值／月營收／EPS／股利／融資融券／重大訊息）、證交所三大法人與外資持股統計、盤中即時行情<br/>
     前端 GitHub Pages · 後端 Cloudflare Worker · 分析由 Claude 產生
   </footer>
 </div>
@@ -397,14 +410,14 @@
   function lsSet(k,v){ try{localStorage.setItem(k,v);}catch(e){} }
 
   var qEl=$("q"), goEl=$("go"), hintEl=$("hint");
-  var resultEl=$("result"), statCard=$("statCard"), anWrap=$("anWrap"), anArea=$("anArea"), anTabs=$("anTabs");
+  var resultEl=$("result"), statCard=$("statCard"), extraCard=$("extraCard"), anWrap=$("anWrap"), anArea=$("anArea"), anTabs=$("anTabs");
   var copyBtn=$("copyBtn"), copyTxt=$("copyTxt");
   var errorEl=$("error"), errText=$("errText"), retryBtn=$("retryBtn");
   var cfgEl=$("cfg"), urlInput=$("workerUrl"), sdot=$("sdot"), sstat=$("sstat");
   var recentRow=$("recentRow"), recentChips=$("recentChips");
   var watchRow=$("watchRow"), watchChips=$("watchChips");
 
-  var state = { scen:"overview", code:null, name:"", snapshot:null, text:"", lastTry:null };
+  var state = { scen:"overview", code:null, name:"", snapshot:null, extra:null, text:"", lastTry:null };
   var busy = false, anTimer=null;
 
   // ---------- Worker 網址 ----------
@@ -576,8 +589,10 @@
   function renderStat(snap){
     var p=snap.price||{}, val=snap.valuation||{}, inst=snap.institutional||{};
     var name = snap.name || snap.code;
-    var lastDate = (snap.history && snap.history.length) ? snap.history[snap.history.length-1].date : "";
-    var dateTxt = (lastDate? mmdd(lastDate) : "最新") + " 收盤 · " + hhmm(snap.asOf) + " 取得";
+    var lastDate = snap.priceDate || ((snap.history && snap.history.length) ? snap.history[snap.history.length-1].date : "");
+    var label = snap.priceLabel || "收盤";
+    var tm = (label==="盤中即時" && snap.priceTime) ? " "+String(snap.priceTime).slice(0,5) : "";
+    var dateTxt = (lastDate? mmdd(lastDate) : "最新") + " " + label + tm + " · " + hhmm(snap.asOf) + " 取得";
     var chg=p.change, pct=p.changePct;
     var chgTxt = (chg==null) ? "" : (sign(chg)+fmt(chg,2)+(pct==null?"":"  ("+sign(pct)+fmt(pct,2)+"%)"));
     var c = cls(chg==null?0:chg);
@@ -590,7 +605,7 @@
     ].map(function(x){ return '<div class="cell"><div class="k">'+x[0]+'</div><div class="v">'+x[1]+'</div></div>'; }).join("");
 
     var instHtml = snap.institutional ?
-      '<div class="inst"><div class="inst-title">三大法人買賣超（張，紅買綠賣）</div><div class="inst-row">'
+      '<div class="inst"><div class="inst-title">三大法人買賣超（張，紅買綠賣）'+(inst.date?" · "+mmdd(inst.date):"")+'</div><div class="inst-row">'
         + instItem("外資", inst.foreignLots) + instItem("投信", inst.trustLots)
         + instItem("自營商", inst.dealerLots) + instItem("合計", inst.totalLots)
       + '</div></div>' : "";
@@ -625,6 +640,54 @@
     });
   }
 
+  // ---------- 基本面・籌碼（/api/extra）----------
+  function pctSpan(v){ return v==null ? "" : '<span class="'+cls(v)+'">'+sign(v)+fmt(v,2)+'%</span>'; }
+  function rocYm(s){ var m=String(s||"").match(/^(\d{2,3})(\d{2})$/); return m? parseInt(m[2],10)+"月" : esc(s||""); }
+  function renderExtraLoading(){
+    extraCard.innerHTML = '<div class="skel ex-card"><div class="sk sk-title" style="width:28%;height:16px;"></div><div class="sk sk-grid"></div></div>';
+  }
+  function renderExtra(ex){
+    if(!ex){
+      extraCard.innerHTML = '<div class="stat ex-card fade"><div class="an-title">基本面 · 籌碼</div>'
+        + '<div class="note">基本面資料暫時讀取不到（月營收、EPS、股利、融資融券等），不影響上方行情與 AI 分析。</div></div>';
+      return;
+    }
+    var pf=ex.profile||{}, mr=ex.monthlyRevenue||{}, q=ex.quarterly||{}, dv=ex.dividend||{}, mg=ex.margin||{}, fr=ex.foreign||{}, mk=ex.marketIndex;
+    var cells = [
+      ["產業", esc(pf.industry||"—"), pf.capitalB!=null ? "股本 "+fmt(pf.capitalB,1)+" 億" : ""],
+      ["月營收"+(mr.ym?"（"+rocYm(mr.ym)+"）":""), mr.revenueB!=null ? fmt(mr.revenueB,1)+" 億" : "—",
+        mr.yoyPct!=null ? "年增 "+pctSpan(mr.yoyPct) : ""],
+      ["累計營收", mr.ytdB!=null ? fmt(mr.ytdB,0)+" 億" : "—", mr.ytdYoyPct!=null ? "年增 "+pctSpan(mr.ytdYoyPct) : ""],
+      ["EPS"+(q.period?"（"+esc(String(q.period).replace(" ",""))+"）":""), fmt(q.eps,2),
+        q.operatingMarginPct!=null ? "營益率 "+fmt(q.operatingMarginPct,1)+"%" : (q.netMarginPct!=null ? "淨利率 "+fmt(q.netMarginPct,1)+"%" : "")],
+      ["現金股利"+(dv.year?"（"+esc(dv.year)+"）":""), dv.cash!=null ? fmt(dv.cash,2)+" 元" : "—", dv.stock ? "股票股利 "+fmt(dv.stock,2)+" 元" : ""],
+      ["融資餘額", mg.marginBalanceLots!=null ? fmt(mg.marginBalanceLots)+" 張" : "—",
+        mg.marginChangeLots!=null ? '增減 <span class="'+cls(mg.marginChangeLots)+'">'+sign(mg.marginChangeLots)+fmt(mg.marginChangeLots)+'</span>' : ""],
+      ["融券餘額", mg.shortBalanceLots!=null ? fmt(mg.shortBalanceLots)+" 張" : "—", ""],
+      ["外資持股", fr.holdingPct!=null ? fmt(fr.holdingPct,2)+"%" : "—", fr.date ? esc(mmdd(fr.date)) : ""]
+    ].map(function(x){
+      return '<div class="cell"><div class="k">'+x[0]+'</div><div class="v">'+x[1]+'</div>'+(x[2]?'<div class="s">'+x[2]+'</div>':'')+'</div>';
+    }).join("");
+
+    var mkHtml = (mk && mk.index!=null)
+      ? '<span class="ex-mkt">加權指數 <b>'+fmt(mk.index,2)+'</b> '+(mk.change!=null?'<span class="'+cls(mk.change)+'">'+sign(mk.change)+fmt(mk.change,2)+'</span>':'')
+        + (mk.date?' · '+esc(mmdd(mk.date)):'')+'</span>' : '';
+
+    var annHtml = "";
+    if(ex.announcements && ex.announcements.length){
+      annHtml = '<div class="inst"><div class="inst-title">重大訊息</div><ul class="ann">'
+        + ex.announcements.map(function(a){ return '<li><span class="d">'+esc(mmdd(a.date))+'</span><span>'+esc(a.subject)+'</span></li>'; }).join("")
+        + '</ul></div>';
+    }
+    var notesHtml = (ex.notes && ex.notes.length) ? '<div class="note">'+esc(ex.notes.join(" "))+'</div>' : "";
+
+    extraCard.innerHTML = '<div class="stat ex-card fade">'
+      + '<div class="ex-head"><span class="an-title">基本面 · 籌碼</span>'+mkHtml+'</div>'
+      + '<div class="grid">'+cells+'</div>'
+      + annHtml + notesHtml
+      + '</div>';
+  }
+
   // ---------- 角度切換（同步兩組籤）----------
   function setScen(key){
     state.scen = key;
@@ -642,7 +705,12 @@
               price:s.price, valuation:s.valuation, institutional:s.institutional, notes:s.notes };
     if(s.history && s.history.length){
       var h = s.history.slice(-30);
-      c.history = { desc:"每日收盤，格式 [日期, 收盤價]", points: h.map(function(x){ return [x.date, x.close]; }) };
+      c.history = { desc:"每日收盤，格式 [日期, 收盤價]（最後一點若為今日則是盤中價）", points: h.map(function(x){ return [x.date, x.close]; }) };
+    }
+    if(state.extra){
+      var e = state.extra;
+      c.extra = { profile:e.profile, monthlyRevenue:e.monthlyRevenue, quarterly:e.quarterly, dividend:e.dividend,
+                  margin:e.margin, foreign:e.foreign, announcements:e.announcements, marketIndex:e.marketIndex };
     }
     return c;
   }
@@ -696,7 +764,20 @@
     .then(function(){ busy=false; goEl.disabled=false; anTabs.classList.remove("lock"); });
   }
 
-  // ---------- 完整流程：秒讀 → 分析 ----------
+  // ---------- 完整流程：秒讀（行情＋基本面並行）→ 分析 ----------
+  function getJSON(url){
+    return fetch(url).then(function(r){
+      return r.json().catch(function(){ return {}; }).then(function(j){ if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j; });
+    });
+  }
+  // 基本面最多等這麼久，逾時就先用行情做分析，不讓整個流程卡住
+  function settleWithin(p, ms){
+    return new Promise(function(resolve){
+      var t=setTimeout(function(){ resolve(null); }, ms);
+      p.then(function(v){ clearTimeout(t); resolve(v); }, function(){ clearTimeout(t); resolve(null); });
+    });
+  }
+
   function runFull(code, noScroll){
     if(busy) return;
     var base=getBase();
@@ -704,24 +785,30 @@
     busy=true; goEl.disabled=true; hideErr();
     state.lastTry=code;
     resultEl.classList.add("show");
-    renderSkeleton();
+    renderSkeleton(); extraCard.innerHTML="";
     anWrap.style.display="none"; anArea.innerHTML=""; state.text=""; copyBtn.disabled=true;
 
-    fetch(base+"/api/stock?code="+encodeURIComponent(code))
-      .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error(j.error||("HTTP "+r.status)); return j; }); })
+    var extraP = settleWithin(getJSON(base+"/api/extra?code="+encodeURIComponent(code)), 12000);
+
+    getJSON(base+"/api/stock?code="+encodeURIComponent(code))
       .then(function(snap){
-        state.code=code; state.name=snap.name||""; state.snapshot=snap;
+        state.code=code; state.name=snap.name||""; state.snapshot=snap; state.extra=null;
         renderStat(snap);
+        renderExtraLoading();
         saveRecent(code, snap.name);
         try{ history.replaceState(null, "", "#"+code); }catch(e){}
         if(!noScroll) resultEl.scrollIntoView({behavior:"smooth", block:"start"});
-        busy=false; goEl.disabled=false;
-        analyzeOnly();
+        return extraP.then(function(ex){
+          state.extra=ex;
+          renderExtra(ex);
+          busy=false; goEl.disabled=false;
+          analyzeOnly();
+        });
       })
       .catch(function(err){
         busy=false; goEl.disabled=false;
-        statCard.innerHTML=""; resultEl.classList.remove("show");
-        showErr(err.message+"　（請確認 Worker 已部署、網址正確，且已設定 ANTHROPIC_API_KEY）");
+        statCard.innerHTML=""; extraCard.innerHTML=""; resultEl.classList.remove("show");
+        showErr(err.message+"　（請確認 Worker 已部署、網址正確；可開啟 Worker 網址加上 /api/debug 檢查證交所資料源）");
       });
   }
 
@@ -841,8 +928,10 @@
     for(var i=0;i<RANKS.length;i++){
       tabs += '<button class="an-tab'+(RANKS[i][0]===radar.tab?" active":"")+'" data-rank="'+RANKS[i][0]+'">'+RANKS[i][1]+'</button>';
     }
+    var dates = d.dataDate ? '<div class="data-date">收盤資料 '+esc(mmdd(d.dataDate))
+      + (d.instDate ? ' · 法人資料 '+esc(mmdd(d.instDate)) : ' · 法人資料暫時無法取得')+'</div>' : '';
     $("radarArea").innerHTML =
-      '<div class="grid fade">'+cells+'</div>'
+      '<div class="grid fade">'+cells+'</div>' + dates
       + '<div class="an-tabs" id="rankTabs" style="margin:14px 0 10px;">'+tabs+'</div>'
       + '<div class="rank-list" id="rankList"></div>'
       + '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">'
