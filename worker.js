@@ -618,6 +618,52 @@ async function buildScreen() {
   };
 }
 
+// ---- 呼叫 Claude（共用）----
+// 有網路搜尋時，伺服器端搜尋迴圈到上限會回 stop_reason "pause_turn"：把目前內容原樣送回即可續跑
+async function callClaude(env, payload) {
+  const blocks = [];
+  const usage = { input_tokens: 0, output_tokens: 0 };
+  let stopReason = null;
+  for (let i = 0; i < 4; i++) {
+    const messages = blocks.length ? payload.messages.concat([{ role: "assistant", content: blocks }]) : payload.messages;
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" },
+      body: JSON.stringify(Object.assign({}, payload, { messages }))
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error && data.error.message) || ("Anthropic " + res.status));
+    if (Array.isArray(data.content)) blocks.push(...data.content);
+    if (data.usage) { usage.input_tokens += data.usage.input_tokens || 0; usage.output_tokens += data.usage.output_tokens || 0; }
+    stopReason = data.stop_reason || null;
+    if (stopReason !== "pause_turn") break;
+  }
+  return { text: textOf(blocks), sources: sourcesOf(blocks), stopReason, usage };
+}
+// 有引用來源時，一段話會被切成好幾個 text 區塊：同一段直接接起來，遇到搜尋區塊才換段
+function textOf(blocks) {
+  const segs = [];
+  let cur = "";
+  for (const b of blocks) {
+    if (b.type === "text") cur += b.text;
+    else if (cur) { segs.push(cur); cur = ""; }
+  }
+  if (cur) segs.push(cur);
+  return segs.map((s) => s.trim()).filter(Boolean).join("\n\n");
+}
+function sourcesOf(blocks) {
+  const seen = {}, out = [];
+  for (const b of blocks) {
+    if (b.type !== "text" || !Array.isArray(b.citations)) continue;
+    for (const c of b.citations) {
+      if (!c || !/^https?:\/\//.test(c.url || "") || seen[c.url]) continue;
+      seen[c.url] = 1;
+      out.push({ url: c.url, title: String(c.title || c.url).slice(0, 120) });
+    }
+  }
+  return out.slice(0, 20);
+}
+
 // ---- 研究指令（Slash Commands）----
 const RESEARCH_SYS =
   "你是台股資深研究員助理，為想深入研究的一般投資人產出專業、精準但淺顯的研究內容。原則：\n" +
@@ -695,20 +741,9 @@ async function runCommand(env, body) {
   };
   if (def.web) payload.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: def.web }];
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const msg = (data && data.error && data.error.message) || ("Anthropic " + res.status);
-    throw new Error(msg);
-  }
-  const text = Array.isArray(data.content)
-    ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n\n").trim()
-    : "";
-  return { text, command: cmdName, model: ANTHROPIC_MODEL, usage: data.usage || null };
+  const r = await callClaude(env, payload);
+  return { text: r.text, sources: r.sources, truncated: r.stopReason === "max_tokens",
+    command: cmdName, code: def.needCode ? code : null, name: nm || null, model: ANTHROPIC_MODEL, usage: r.usage };
 }
 
 // ---- 呼叫 Claude 做分析 ----
@@ -759,30 +794,13 @@ async function analyze(env, body) {
       "請根據上面的數據，產出精簡、精準的分析。";
   }
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: ANALYSIS_MAX_TOKENS,
-      system: system,
-      messages: [{ role: "user", content: userMsg }]
-    })
+  const r = await callClaude(env, {
+    model: ANTHROPIC_MODEL,
+    max_tokens: ANALYSIS_MAX_TOKENS,
+    system: system,
+    messages: [{ role: "user", content: userMsg }]
   });
-
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const msg = (data && data.error && data.error.message) || ("Anthropic " + res.status);
-    throw new Error(msg);
-  }
-  const text = Array.isArray(data.content)
-    ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n\n").trim()
-    : "";
-  return { text, model: ANTHROPIC_MODEL, usage: data.usage || null };
+  return { text: r.text, model: ANTHROPIC_MODEL, usage: r.usage };
 }
 
 // ---- 自選股新聞彙整（Claude + 網路搜尋）----
@@ -801,31 +819,14 @@ async function newsDigest(env, body) {
 
   const userMsg = "我的自選股：" + listTxt + "。\n請搜尋並彙整每一檔的最新新聞近況。";
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 2500,
-      system: system,
-      messages: [{ role: "user", content: userMsg }],
-      tools: [{ type: "web_search_20250305", name: "web_search" }]
-    })
+  const r = await callClaude(env, {
+    model: ANTHROPIC_MODEL,
+    max_tokens: 2500,
+    system: system,
+    messages: [{ role: "user", content: userMsg }],
+    tools: [{ type: "web_search_20250305", name: "web_search" }]
   });
-
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const msg = (data && data.error && data.error.message) || ("Anthropic " + res.status);
-    throw new Error(msg);
-  }
-  const text = Array.isArray(data.content)
-    ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("\n\n").trim()
-    : "";
-  return { text, model: ANTHROPIC_MODEL };
+  return { text: r.text, sources: r.sources, model: ANTHROPIC_MODEL };
 }
 
 // ---- 資料源健康檢查（/api/debug）----
