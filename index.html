@@ -678,7 +678,7 @@
     ].map(function(x){ return '<div class="cell"><div class="k">'+x[0]+'</div><div class="v">'+x[1]+'</div></div>'; }).join("");
 
     var instHtml = snap.institutional ?
-      '<div class="inst"><div class="inst-title">三大法人買賣超（張，紅買綠賣）'+(inst.date?" · "+mmdd(inst.date):"")+'</div><div class="inst-row">'
+      '<div class="inst"><div class="inst-title">三大法人買賣超（張，紅買綠賣）'+(inst.date?" · "+esc(mmdd(inst.date)):"")+'</div><div class="inst-row">'
         + instItem("外資", inst.foreignLots) + instItem("投信", inst.trustLots)
         + instItem("自營商", inst.dealerLots) + instItem("合計", inst.totalLots)
       + '</div></div>' : "";
@@ -775,10 +775,12 @@
   // ---------- 傳給分析的精簡數據（省 token、更快）----------
   function compactSnap(s){
     var c = { code:s.code, name:s.name, market:s.market, asOf:s.asOf, source:s.source,
-              price:s.price, valuation:s.valuation, institutional:s.institutional, notes:s.notes };
+              price:s.price, priceDate:s.priceDate||null, priceLabel:s.priceLabel||null, priceTime:s.priceTime||null,
+              valuation:s.valuation, institutional:s.institutional, notes:s.notes };
     if(s.history && s.history.length){
       var h = s.history.slice(-30);
-      c.history = { desc:"每日收盤，格式 [日期, 收盤價]（最後一點若為今日則是盤中價）", points: h.map(function(x){ return [x.date, x.close]; }) };
+      var live = s.priceLabel==="盤中即時" ? "（最後一點 "+s.priceDate+" 為盤中即時價 "+String(s.priceTime||"").slice(0,5)+"）" : "";
+      c.history = { desc:"每日收盤，格式 [日期, 收盤價]"+live, points: h.map(function(x){ return [x.date, x.close]; }) };
     }
     if(state.extra){
       var e = state.extra;
@@ -861,7 +863,8 @@
     renderSkeleton(); extraCard.innerHTML="";
     anWrap.style.display="none"; anArea.innerHTML=""; state.text=""; copyBtn.disabled=true;
 
-    var extraP = settleWithin(getJSON(base+"/api/extra?code="+encodeURIComponent(code)), 12000);
+    // 基本面與行情同時發出；等待時間從行情卡出現才開始算，且要比 Worker 單一資料源逾時（12 秒）長
+    var extraRaw = getJSON(base+"/api/extra?code="+encodeURIComponent(code)).catch(function(){ return null; });
 
     getJSON(base+"/api/stock?code="+encodeURIComponent(code))
       .then(function(snap){
@@ -871,7 +874,7 @@
         saveRecent(code, snap.name);
         try{ history.replaceState(null, "", "#"+code); }catch(e){}
         if(!noScroll) resultEl.scrollIntoView({behavior:"smooth", block:"start"});
-        return extraP.then(function(ex){
+        return settleWithin(extraRaw, 16000).then(function(ex){
           state.extra=ex;
           renderExtra(ex);
           busy=false; goEl.disabled=false;

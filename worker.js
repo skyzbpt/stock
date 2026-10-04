@@ -77,17 +77,20 @@ function ymdOf(d) {
   return d.getUTCFullYear() + String(d.getUTCMonth() + 1).padStart(2, "0") + String(d.getUTCDate()).padStart(2, "0");
 }
 
-// ---- 同一個 Worker 實例內的記憶體快取（合併同時發出的請求，也減少打到證交所的次數）----
+// ---- 同一個 Worker 實例內的記憶體快取（減少打到證交所的次數）----
+// 只存「已完成」的結果：Workers 不允許一個請求等待另一個請求的 I/O（會被判定卡死回 1101），
+// 所以不能把進行中的 Promise 放進共用快取；同時發出的重複請求交給 Cloudflare 邊緣快取吸收。
 const MEMO = new Map();
-function memo(key, ttlSec, fn) {
-  const now = Date.now(), hit = MEMO.get(key);
-  if (hit && hit.exp > now) return hit.p;
-  if (MEMO.size > 400) for (const [k, v] of MEMO) if (v.exp <= now) MEMO.delete(k);
-  const p = Promise.resolve().then(fn);
-  MEMO.set(key, { p, exp: now + ttlSec * 1000 });
-  const drop = () => { const cur = MEMO.get(key); if (cur && cur.p === p) MEMO.delete(key); };
-  p.then((v) => { if (v == null) drop(); }, drop);
-  return p;
+async function memo(key, ttlSec, fn) {
+  const hit = MEMO.get(key);
+  if (hit && hit.exp > Date.now()) return hit.v;
+  const v = await fn();
+  if (v != null) {
+    const now = Date.now();
+    if (MEMO.size > 400) for (const [k, e] of MEMO) if (e.exp <= now) MEMO.delete(k);
+    MEMO.set(key, { v, exp: now + ttlSec * 1000 });
+  }
+  return v;
 }
 
 // ---- 抓證交所資料（伺服器端 + Cloudflare 邊緣快取）----
@@ -143,12 +146,13 @@ async function twseRwd(path, params, ttl) {
   return { date: j.date ? anyDateToISO(j.date) : null, fields: fields.map((f) => String(f).trim()), data };
 }
 
-// 盤後資料約 15:00 後公布：從最近一個交易日往回找（跳過週末；遇連假多試幾天）
+// 盤後資料約 15:00 後公布：從最近一個交易日往回找（跳過週末；農曆年前後可能連續 7 個平日休市，最多試 10 天）
+// 休市日查無資料的結果會快取 12 小時，所以長回推只有第一次會多打幾次
 async function twseLatest(path, params) {
   const now = twNow(), today = ymdOf(now);
   const d = new Date(now.getTime());
   if (now.getUTCHours() < 15) d.setUTCDate(d.getUTCDate() - 1);
-  for (let tries = 0, guard = 0; tries < 5 && guard < 12; guard++, d.setUTCDate(d.getUTCDate() - 1)) {
+  for (let tries = 0, guard = 0; tries < 10 && guard < 20; guard++, d.setUTCDate(d.getUTCDate() - 1)) {
     const dow = d.getUTCDay();
     if (dow === 0 || dow === 6) continue;
     const ymd = ymdOf(d);
