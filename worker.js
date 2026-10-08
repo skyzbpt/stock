@@ -2,17 +2,23 @@
  * 台股天際線 · 後端 Worker (Cloudflare Workers)
  * ------------------------------------------------------------------
  * 路由：
- *   GET  /api/stock?code=2330   → 行情＋估值＋三大法人＋近兩月走勢（秒讀）
+ *   GET  /api/stock?code=2330   → 行情＋估值＋三大法人＋近兩月走勢（秒讀；上市、上櫃皆可）
  *   GET  /api/extra?code=2330   → 基本面與籌碼：月營收、季 EPS、股利、融資融券、外資持股、重大訊息、大盤
- *   GET  /api/screen            → 全市場掃描（市場雷達五份榜單）
- *   GET  /api/debug             → 逐一檢查每個證交所資料源是否正常（部署後先打這支確認）
+ *   GET  /api/screen            → 全市場掃描（市場雷達五份榜單，目前只含上市）
+ *   GET  /api/debug             → 逐一檢查每個證交所／櫃買中心資料源是否正常（部署後先打這支確認）
  *   POST /api/analyze | /api/news | /api/command → 呼叫 Claude
  *
- * 證交所資料來源：
+ * 證交所資料來源（上市）：
  *   - OpenAPI（openapi.twse.com.tw/v1）：每日收盤、估值、月營收、EPS、股利、融資融券、重大訊息、大盤
  *   - 證交所網站 RWD 端點（www.twse.com.tw/rwd/zh）：OpenAPI 沒提供的「三大法人 T86」「外資持股 MI_QFIIS」
  *     與「個股日成交 STOCK_DAY」。這組端點有頻率限制（約每 5 秒 3 次），所以全部加了快取與交易日回推。
- *   - 即時行情（mis.twse.com.tw）：盤中約 5 秒延遲的快照
+ *   - 即時行情（mis.twse.com.tw）：盤中約 5 秒延遲的快照（上市、上櫃都有）
+ *
+ * 櫃買中心資料來源（上櫃）：
+ *   - OpenAPI（www.tpex.org.tw/openapi/v1）：估值、融資融券、櫃買指數、基本資料、月營收、EPS、股利、重大訊息
+ *   - 網站端點（www.tpex.org.tw/www/zh-tw）：三大法人買賣明細、個股日成交
+ *   - 有開源專案回報櫃買中心會擋 Cloudflare 機房發出的請求（回 520），所以上櫃資料全部當「選配」：
+ *     抓不到就加註說明，行情改靠即時快照，不影響上市股票。部署後請用 /api/debug 確認。
  *
  * 為什麼要有這個後端：
  *   1. 證交所 API 從瀏覽器直接打會有 CORS 問題；從 Worker（伺服器端）打沒有這個限制，還能快取。
@@ -56,10 +62,11 @@ function num(v) {
   return isNaN(n) ? null : n;
 }
 // 依關鍵字在物件的 key 裡找第一個符合的欄位（相容英文／中文欄位名）
+// 同一個關鍵字先找完全相同的欄位，避免 "MarginPurchaseBalance" 誤抓到 "MarginPurchaseBalancePreviousDay"
 function pick(obj, patterns) {
   const keys = Object.keys(obj || {});
   for (const p of patterns) {
-    const k = keys.find((k) => k.indexOf(p) !== -1);
+    const k = keys.find((k) => k.trim() === p) || keys.find((k) => k.indexOf(p) !== -1);
     if (k != null) return obj[k];
   }
   return null;
@@ -95,25 +102,41 @@ async function memo(key, ttlSec, fn) {
 
 // ---- 抓證交所資料（伺服器端 + Cloudflare 邊緣快取）----
 const FETCH_TIMEOUT_MS = 12000;
-// www.twse.com.tw 約每 5 秒 3 次就可能暫時封鎖 IP：同一實例內把請求錯開，避免冷快取時一次爆量
+const RT_TIMEOUT_MS = 5000;   // 即時行情在查詢的關鍵路徑上，逾時設短一點
+// www.twse.com.tw 約每 5 秒 3 次就可能暫時封鎖 IP：同一實例內把請求錯開，避免冷快取時一次爆量（櫃買中心比照辦理）
 const WWW_GAP_MS = 450;
-let wwwNext = 0;
-async function wwwSlot() {
-  const now = Date.now(), at = Math.max(now, wwwNext);
-  wwwNext = at + WWW_GAP_MS;
+const THROTTLED = { "www.twse.com.tw": 1, "www.tpex.org.tw": 1 };
+const slotNext = {};
+async function hostSlot(host) {
+  const now = Date.now(), at = Math.max(now, slotNext[host] || 0);
+  slotNext[host] = at + WWW_GAP_MS;
   if (at > now) await new Promise((r) => setTimeout(r, at - now));
 }
+// 櫃買中心連不上（逾時、5xx、回 HTML）時，1 分鐘內不再重試，免得每次查詢都卡在等它
+const TPEX_HOST = "www.tpex.org.tw";
+const TPEX_BACKOFF_MS = 60000;
+let tpexDownUntil = 0;
 function twFetch(u, ttl) {
   return memo(u, ttl || 600, async () => {
-    if (u.indexOf("https://www.twse.com.tw/") === 0) await wwwSlot();
-    const res = await fetch(u, {
-      headers: { "User-Agent": UA, "Accept": "application/json" },
-      cf: { cacheTtl: ttl || 600, cacheEverything: true },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-    });
-    if (!res.ok) throw new Error("TWSE " + res.status + " " + new URL(u).pathname);
-    // 被限流時證交所會回 HTML 而不是 JSON
-    return res.json().catch(() => { throw new Error("TWSE 回傳非 JSON（可能被限流）" + new URL(u).pathname); });
+    const url = new URL(u), isTpex = url.host === TPEX_HOST, tag = isTpex ? "TPEx" : "TWSE";
+    const down = () => { if (isTpex) tpexDownUntil = Date.now() + TPEX_BACKOFF_MS; };
+    if (isTpex && Date.now() < tpexDownUntil) throw new Error("TPEx 剛才連線失敗，暫停重試 1 分鐘");
+    // 只錯開網站端點；OpenAPI 是整包資料集、都有快取，不需要排隊
+    if (THROTTLED[url.host] && url.pathname.indexOf("/openapi/") !== 0) await hostSlot(url.host);
+    let res;
+    try {
+      res = await fetch(u, {
+        headers: { "User-Agent": UA, "Accept": "application/json" },
+        cf: { cacheTtl: ttl || 600, cacheEverything: true },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+      });
+    } catch (e) { down(); throw e; }
+    if (!res.ok) {
+      if (res.status >= 500 || res.status === 403 || res.status === 429) down(); // 404 可能只是單一資料集改名，不算整站掛掉
+      throw new Error(tag + " " + res.status + " " + url.pathname);
+    }
+    // 被限流（或被擋）時會回 HTML 而不是 JSON
+    return res.json().catch(() => { down(); throw new Error(tag + " 回傳非 JSON（可能被限流）" + url.pathname); });
   });
 }
 
@@ -132,6 +155,20 @@ const OPENAPI = {
 };
 function oa(key, ttl) { return twFetch("https://openapi.twse.com.tw/v1/" + OPENAPI[key], ttl); }
 
+// 櫃買中心 OpenAPI 資料集（https://www.tpex.org.tw/openapi/ 有完整清單）
+// mopsfe_* 與證交所 t187ap* 同樣來自公開資訊觀測站，欄位名稱相同，解析程式共用
+const TPEX_OPENAPI = {
+  pe:    "tpex_mainboard_peratio_analysis",  // 本益比、殖利率、股價淨值比
+  margn: "tpex_mainboard_margin_balance",    // 融資融券餘額
+  index: "tpex_index",                       // 櫃買指數
+  basic: "mopsfe_t187ap03_O",                // 上櫃公司基本資料
+  rev:   "mopsfe_t187ap05_O",                // 每月營業收入彙總表
+  fin:   "mopsfe_t187ap14_O",                // 各產業 EPS 統計資訊（季）
+  div:   "mopsfe_t187ap45_O",                // 股利分派情形
+  news:  "mopsfe_t187ap04_O"                 // 每日重大訊息
+};
+function tpOa(key, ttl) { return twFetch("https://" + TPEX_HOST + "/openapi/v1/" + TPEX_OPENAPI[key], ttl); }
+
 // ---- 證交所網站 RWD 端點：回傳 { date, fields, data }；查無資料回 null，連線失敗會丟錯 ----
 async function twseRwd(path, params, ttl) {
   const q = Object.keys(params).map((k) => k + "=" + encodeURIComponent(params[k])).join("&");
@@ -146,9 +183,21 @@ async function twseRwd(path, params, ttl) {
   return { date: j.date ? anyDateToISO(j.date) : null, fields: fields.map((f) => String(f).trim()), data };
 }
 
+// ---- 櫃買中心網站端點：回傳 { stat:"ok", tables:[{ date, fields, data }] } → { date, name, fields, data }；查無資料回 null ----
+function slashDate(ymd) { return ymd.slice(0, 4) + "/" + ymd.slice(4, 6) + "/" + ymd.slice(6, 8); }
+async function tpexWww(path, params, ttl) {
+  const q = Object.keys(params).map((k) => k + "=" + encodeURIComponent(params[k])).join("&");
+  const j = await twFetch("https://" + TPEX_HOST + "/www/zh-tw/" + path + "?" + q + "&response=json", ttl);
+  if (!j || String(j.stat || "").toLowerCase() !== "ok" || !Array.isArray(j.tables)) return null;
+  const t = j.tables.find((t) => Array.isArray(t.data) && t.data.length);
+  if (!t) return null;
+  return { date: (t.date || j.date) ? anyDateToISO(t.date || j.date) : null, name: j.name || null,
+    fields: (Array.isArray(t.fields) ? t.fields : []).map((f) => String(f).trim()), data: t.data };
+}
+
 // 盤後資料約 15:00 後公布：從最近一個交易日往回找（跳過週末；農曆年前後可能連續 7 個平日休市，最多試 10 天）
 // 休市日查無資料的結果會快取 12 小時，所以長回推只有第一次會多打幾次
-async function twseLatest(path, params) {
+async function latestTradingDay(fetchDay) {
   const now = twNow(), today = ymdOf(now);
   const d = new Date(now.getTime());
   if (now.getUTCHours() < 15) d.setUTCDate(d.getUTCDate() - 1);
@@ -157,12 +206,18 @@ async function twseLatest(path, params) {
     if (dow === 0 || dow === 6) continue;
     const ymd = ymdOf(d);
     let r;
-    try { r = await twseRwd(path, Object.assign({ date: ymd }, params), ymd === today ? 300 : 43200); }
+    try { r = await fetchDay(ymd, ymd === today ? 300 : 43200); }
     catch (e) { return null; } // 連線失敗或被限流就停，不要繼續狂打
     if (r) return Object.assign(r, { date: r.date || anyDateToISO(ymd) });
     tries++;
   }
   return null;
+}
+function twseLatest(path, params) {
+  return latestTradingDay((ymd, ttl) => twseRwd(path, Object.assign({ date: ymd }, params), ttl));
+}
+function tpexLatest(path, params) {
+  return latestTradingDay((ymd, ttl) => tpexWww(path, Object.assign({ date: slashDate(ymd) }, params), ttl));
 }
 function colIdx(fields, test) { return fields.findIndex(test); }
 const has = (s) => (h) => h.indexOf(s) !== -1;
@@ -220,7 +275,34 @@ function fetchQFIIS() {
   });
 }
 
-// ---- 盤中／當日即時快照（TWSE MIS，約 5 秒延遲）----
+// ---- 上櫃三大法人買賣明細（櫃買中心網站端點）----
+// 欄位順序參考 fugle/node-twstock（以實際回應驗證）：代號、名稱之後
+//   24 欄版：外資(不含外資自營商) 買/賣/超、外資自營商 買/賣/超、外資及陸資合計 買/賣/超、投信 買/賣/超、
+//           自營商(自行買賣) 買/賣/超、自營商(避險) 買/賣/超、自營商合計 買/賣/超、三大法人合計
+//   16 欄版：外資 買/賣/超、投信 買/賣/超、自營商合計、自營商(自行買賣) 買/賣/超、自營商(避險) 買/賣/超、三大法人合計
+function fetchTpexInst() {
+  return memo("TPEX_INST", 600, async () => {
+    const r = await tpexLatest("insti/dailyTrade", { type: "Daily", sect: "EW" });
+    if (!r) return null;
+    // 單位通常是「股」；若欄位標示為「張」就不用再除以 1000
+    const inLots = r.fields.some((h) => h.indexOf("張") !== -1);
+    const lots = (v) => (v == null ? null : inLots ? Math.round(v) : Math.round(v / 1000));
+    const byCode = {};
+    for (const row of r.data) {
+      const code = String(row[0] || "").trim();
+      if (!code) continue;
+      const v = row.slice(2).map(num);
+      let foreign, trust, dealer, total;
+      if (v.length >= 22) { foreign = v[8]; trust = v[11]; dealer = v[20]; total = v[21]; }
+      else if (v.length >= 14) { foreign = v[2]; trust = v[5]; dealer = v[6]; total = v[13]; }
+      else continue;
+      byCode[code] = { foreignLots: lots(foreign), trustLots: lots(trust), dealerLots: lots(dealer), totalLots: lots(total) };
+    }
+    return { date: r.date, byCode };
+  });
+}
+
+// ---- 盤中／當日即時快照（TWSE MIS，約 5 秒延遲；上市 tse_、上櫃 otc_）----
 async function fetchRealtime(code) {
   const urls = [
     "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_" + code + ".tw&json=1&delay=0",
@@ -234,7 +316,8 @@ async function fetchRealtime(code) {
           "Accept": "application/json",
           "Referer": "https://mis.twse.com.tw/stock/index.jsp"
         },
-        cf: { cacheTtl: 30, cacheEverything: true }
+        cf: { cacheTtl: 30, cacheEverything: true },
+        signal: AbortSignal.timeout(RT_TIMEOUT_MS)
       });
       if (!res.ok) continue;
       const j = await res.json().catch(() => null);
@@ -253,6 +336,7 @@ async function fetchRealtime(code) {
       const iso = anyDateToISO(m.d) || null;
       return {
         name: m.n || null,
+        ex: m.ex === "otc" ? "otc" : "tse",
         market: m.ex === "otc" ? "上櫃 (TPEx)" : "上市 (TWSE)",
         date: /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null, time: m.t || null, approx,
         close: z, open: num(m.o), high: num(m.h), low: num(m.l),
@@ -298,13 +382,96 @@ async function fetchHistory(code) {
   return rows.slice(-40);
 }
 
+// ---- 上櫃個股日成交（櫃買中心網站端點）----
+// 欄位：日期、成交張數（舊資料為成交仟股，兩者都是 1000 股）、成交仟元、開盤、最高、最低、收盤、漲跌、筆數
+// 回傳 { name, rows }；rows 帶開高低收，最新一筆可直接當收盤行情
+async function fetchTpexHistory(code) {
+  const now = twNow();
+  const months = [
+    { ymd: ymdOf(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))), ttl: 43200 },
+    { ymd: ymdOf(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))), ttl: 1800 }
+  ];
+  let rows = [], name = null;
+  for (const m of months) {
+    let r = null;
+    try { r = await tpexWww("afterTrading/tradingStock", { code, date: slashDate(m.ymd) }, m.ttl); }
+    catch (e) { break; } // 連不上就停，不要再多打
+    if (!r) continue;
+    name = name || r.name;
+    const f = r.fields;
+    const at = (test, dflt) => { const i = colIdx(f, test); return i < 0 ? dflt : i; };
+    const iVol = at((h) => h.indexOf("成交") === 0 && (h.indexOf("張") !== -1 || h.indexOf("仟股") !== -1), 1);
+    const iAmt = at(has("仟元"), 2), iOpen = at(has("開盤"), 3), iHigh = at(has("最高"), 4), iLow = at(has("最低"), 5);
+    const iClose = at(has("收盤"), 6), iChg = at(has("漲跌"), 7), iTx = at(has("筆數"), 8);
+    for (const d of r.data) {
+      const close = num(d[iClose]);
+      if (close == null) continue;
+      const amt = num(d[iAmt]);
+      rows.push({
+        date: rocToISO(String(d[0]).replace(/[^\d\/]/g, "")), close, volumeLots: num(d[iVol]),
+        open: num(d[iOpen]), high: num(d[iHigh]), low: num(d[iLow]), change: num(d[iChg]),
+        tradeValue: amt != null ? amt * 1000 : null, transactions: num(d[iTx])
+      });
+    }
+  }
+  const seen = {};
+  rows = rows.filter((x) => (seen[x.date] ? false : (seen[x.date] = 1)));
+  return { name, rows: rows.slice(-40) };
+}
+
+// 盤中／當日即時快照優先（解決全市場收盤檔更新延遲的問題）
+function applyRealtime(snap, rt, source) {
+  if (!rt || rt.close == null) return;
+  snap.name = snap.name || rt.name;
+  if (rt.market) snap.market = rt.market;
+  const base = snap.price || {};
+  const sameDay = base.close != null && base.close === rt.close;
+  snap.price = {
+    close: rt.close, open: rt.open, high: rt.high, low: rt.low,
+    change: rt.change, changePct: rt.changePct,
+    volumeLots: rt.volumeLots != null ? rt.volumeLots : (base.volumeLots != null ? base.volumeLots : null),
+    tradeValue: sameDay && base.tradeValue != null ? base.tradeValue : null,
+    transactions: sameDay && base.transactions != null ? base.transactions : null
+  };
+  snap.priceDate = rt.date;
+  snap.priceTime = rt.time;
+  snap.priceLabel = rt.time === "13:30:00" ? "收盤" : "盤中即時";
+  snap.source = source + " ＋ 即時行情快照";
+  if (rt.approx) snap.notes.push("最近 5 秒內沒有成交，現價暫以最佳買價（或賣價）顯示。");
+}
+// 盤中／今日即時價還沒進日成交檔：補到走勢最後一點，讓走勢圖與技術面看到今天
+function appendLive(hist, rt) {
+  if (!hist || !rt || !rt.date || rt.close == null) return;
+  const last = hist[hist.length - 1];
+  if (!last || last.date < rt.date) hist.push({ date: rt.date, close: rt.close, volumeLots: rt.volumeLots, live: true });
+}
+
+// 上市全市場收盤檔筆數正常（上千檔）才拿來判斷市場；空陣列或殘缺時當作沒抓到，免得把上市股誤判成上櫃
+function listedOf(dayAll) { return Array.isArray(dayAll) && dayAll.length > 100 ? dayAll : null; }
+
+// 先看上市全市場收盤檔（通常已在快取）判斷上市或上櫃；即時行情同時發出，上市股不會因此變慢
 async function buildSnapshot(code) {
-  const [dayAll, bwibbu, t86, hist, rt] = await Promise.all([
-    oa("dayAll", 600).catch(() => null),
+  const rtP = fetchRealtime(code).catch(() => null);
+  const dayAll = await oa("dayAll", 600).catch(() => null);
+  const listed = listedOf(dayAll);
+  if (listed && listed.some((r) => r.Code === code)) return buildTwseSnapshot(code, dayAll, rtP);
+  const rt = await rtP;
+  if (rt && rt.ex === "tse") return buildTwseSnapshot(code, dayAll, rtP);
+  // 不在上市清單、或即時行情說是上櫃 → 走上櫃
+  if (rt || listed) return buildOtcSnapshot(code, rt);
+  // 上市收盤檔與即時行情都抓不到：照舊先走上市，沒有價格再試上櫃
+  const s = await buildTwseSnapshot(code, dayAll, rtP);
+  if (s.price) return s;
+  const o = await buildOtcSnapshot(code, null).catch(() => null);
+  return (o && o.price) ? o : s;
+}
+
+async function buildTwseSnapshot(code, dayAll, rtP) {
+  const [bwibbu, t86, hist, rt] = await Promise.all([
     oa("bwibbu", 600).catch(() => null),
     fetchT86().catch(() => null),
     fetchHistory(code).catch(() => null),
-    fetchRealtime(code).catch(() => null)
+    rtP
   ]);
 
   const snap = {
@@ -331,27 +498,9 @@ async function buildSnapshot(code) {
       snap.priceLabel = "收盤";
     }
   }
-  // 盤中／當日即時快照優先（解決全市場收盤檔更新延遲的問題）
-  if (rt && rt.close != null) {
-    snap.name = snap.name || rt.name;
-    if (rt.market) snap.market = rt.market;
-    const base = snap.price || {};
-    const sameDay = base.close != null && base.close === rt.close;
-    snap.price = {
-      close: rt.close, open: rt.open, high: rt.high, low: rt.low,
-      change: rt.change, changePct: rt.changePct,
-      volumeLots: rt.volumeLots != null ? rt.volumeLots : (base.volumeLots != null ? base.volumeLots : null),
-      tradeValue: sameDay && base.tradeValue != null ? base.tradeValue : null,
-      transactions: sameDay && base.transactions != null ? base.transactions : null
-    };
-    snap.priceDate = rt.date;
-    snap.priceTime = rt.time;
-    snap.priceLabel = rt.time === "13:30:00" ? "收盤" : "盤中即時";
-    snap.source = "臺灣證券交易所 OpenAPI ＋ 即時行情快照";
-    if (rt.approx) snap.notes.push("最近 5 秒內沒有成交，現價暫以最佳買價（或賣價）顯示。");
-  }
+  applyRealtime(snap, rt, "臺灣證券交易所 OpenAPI");
 
-  if (!snap.price) snap.notes.push("查無此代號的上市每日收盤資料（可能為上櫃／興櫃，或當日非交易日）。");
+  if (!snap.price) snap.notes.push("查無此代號的每日收盤資料（可能為興櫃、代號有誤，或當日非交易日）。");
 
   // 估值（本益比／殖利率／股價淨值比）
   if (Array.isArray(bwibbu)) {
@@ -373,11 +522,7 @@ async function buildSnapshot(code) {
     snap.notes.push(t86 ? "最近交易日三大法人資料中查無此代號。" : "三大法人資料暫時無法取得（證交所尚未公布或連線受限）。");
   }
 
-  // 盤中／今日即時價還沒進日成交檔：補到走勢最後一點，讓走勢圖與技術面看到今天
-  if (hist && rt && rt.date && rt.close != null) {
-    const last = hist[hist.length - 1];
-    if (!last || last.date < rt.date) hist.push({ date: rt.date, close: rt.close, volumeLots: rt.volumeLots, live: true });
-  }
+  appendLive(hist, rt);
 
   // 歷史走勢（若每日收盤缺，用歷史最後一筆補價格）
   if (hist && hist.length) {
@@ -412,6 +557,65 @@ async function buildSnapshot(code) {
   return snap;
 }
 
+async function buildOtcSnapshot(code, rt) {
+  const [pe, inst, th] = await Promise.all([
+    tpOa("pe", 600).catch(() => null),
+    fetchTpexInst().catch(() => null),
+    fetchTpexHistory(code).catch(() => null)
+  ]);
+  const SRC = "證券櫃檯買賣中心（櫃買中心）";
+  const hist = th && th.rows.length ? th.rows : null;
+  const snap = {
+    code, name: (th && th.name) || null, market: "上櫃 (TPEx)", asOf: new Date().toISOString(),
+    source: SRC, price: null, priceDate: null, priceLabel: null, priceTime: null,
+    valuation: null, institutional: null, history: null, notes: []
+  };
+
+  // 收盤行情：個股日成交最新一筆
+  if (hist) {
+    const last = hist[hist.length - 1];
+    const prev = last.change != null ? last.close - last.change : null;
+    snap.price = {
+      close: last.close, open: last.open, high: last.high, low: last.low, change: last.change,
+      changePct: (last.change != null && prev) ? +(last.change / prev * 100).toFixed(2) : null,
+      volumeLots: last.volumeLots, tradeValue: last.tradeValue, transactions: last.transactions
+    };
+    snap.priceDate = last.date;
+    snap.priceLabel = "收盤";
+  }
+  applyRealtime(snap, rt, SRC);
+  if (!snap.price) snap.notes.push("查無此代號的上市／上櫃行情（可能為興櫃、代號有誤，或櫃買中心暫時無法連線）。");
+
+  // 估值（本益比／殖利率／股價淨值比）
+  if (Array.isArray(pe)) {
+    const row = pe.find((r) => codeOf(r) === code);
+    if (row) {
+      snap.name = snap.name || String(pick(row, ["CompanyName", "公司名稱"]) || "").trim() || null;
+      snap.valuation = {
+        pe: num(pick(row, ["PriceEarningRatio", "本益比"])),
+        dividendYield: num(pick(row, ["YieldRatio", "殖利率"])),
+        pb: num(pick(row, ["PriceBookRatio", "淨值比"]))
+      };
+    }
+  }
+
+  // 三大法人買賣超（張；外資含外資自營商）
+  if (inst && inst.byCode[code]) {
+    snap.institutional = Object.assign({ unit: "張", date: inst.date }, inst.byCode[code]);
+  } else if (snap.price) {
+    snap.notes.push(inst ? "最近交易日上櫃三大法人資料中查無此代號。" : "上櫃三大法人資料暫時無法取得（櫃買中心尚未公布或連線受限）。");
+  }
+
+  // 歷史走勢
+  if (hist) {
+    snap.history = hist.map((x) => ({ date: x.date, close: x.close, volumeLots: x.volumeLots }));
+    appendLive(snap.history, rt);
+  } else if (snap.price) {
+    snap.notes.push("上櫃個股走勢暫時無法取得（櫃買中心連線受限），目前只顯示即時行情。");
+  }
+  return snap;
+}
+
 // ---- 個股延伸資料（基本面／籌碼／重大訊息／大盤）----
 const INDUSTRY = { "01":"水泥工業","02":"食品工業","03":"塑膠工業","04":"紡織纖維","05":"電機機械","06":"電器電纜","08":"玻璃陶瓷","09":"造紙工業","10":"鋼鐵工業","11":"橡膠工業","12":"汽車工業","14":"建材營造","15":"航運業","16":"觀光餐旅","17":"金融保險","18":"貿易百貨","19":"綜合","20":"其他","21":"化學工業","22":"生技醫療","23":"油電燃氣","24":"半導體","25":"電腦及週邊設備","26":"光電","27":"通信網路","28":"電子零組件","29":"電子通路","30":"資訊服務","31":"其他電子","32":"文化創意","33":"農業科技","34":"電子商務","35":"綠能環保","36":"數位雲端","37":"運動休閒","38":"居家生活" };
 
@@ -423,24 +627,41 @@ function anyDateToISO(d) {
   if (/^\d{8}$/.test(s)) return s.slice(0, 4) + "-" + s.slice(4, 6) + "-" + s.slice(6, 8);
   return s;
 }
-function codeOf(r) { return String(r.Code || r["公司代號"] || r["證券代號"] || r["股票代號"] || "").trim(); }
+function codeOf(r) {
+  const v = r.Code || r.SecuritiesCompanyCode || r["公司代號"] || r["證券代號"] || r["股票代號"] ||
+    pick(r, ["公司代號", "證券代號", "股票代號", "CompanyCode"]);
+  return String(v || "").trim();
+}
+
+// 上市全市場收盤檔裡沒有這檔 → 當上櫃；收盤檔抓不到時照舊當上市
+async function isOtc(code) {
+  const listed = listedOf(await oa("dayAll", 600).catch(() => null));
+  return !!listed && !listed.some((r) => r.Code === code);
+}
 
 async function buildExtra(code) {
+  const otc = await isOtc(code);
+  const get = otc ? tpOa : oa;
   const [basic, rev, fin, div, margn, qfiis, qfii20, news, mkt] = await Promise.all([
-    oa("basic", 3600).catch(() => null),
-    oa("rev", 3600).catch(() => null),
-    oa("fin", 3600).catch(() => null),
-    oa("div", 3600).catch(() => null),
-    oa("margn", 1800).catch(() => null),
-    fetchQFIIS().catch(() => null),
-    oa("qfii20", 1800).catch(() => null),
-    oa("news", 600).catch(() => null),
-    oa("mkt", 1800).catch(() => null)
+    get("basic", 3600).catch(() => null),
+    get("rev", 3600).catch(() => null),
+    get("fin", 3600).catch(() => null),
+    get("div", 3600).catch(() => null),
+    get("margn", 1800).catch(() => null),
+    otc ? null : fetchQFIIS().catch(() => null),
+    otc ? null : oa("qfii20", 1800).catch(() => null),
+    get("news", 600).catch(() => null),
+    (otc ? tpOa("index", 1800) : oa("mkt", 1800)).catch(() => null)
   ]);
-  const out = { code, asOf: new Date().toISOString(),
-    source: "臺灣證券交易所 OpenAPI（基本資料／月營收／季報／股利／信用交易／重大訊息／大盤）＋ 證交所外資持股統計",
+  const out = { code, market: otc ? "上櫃 (TPEx)" : "上市 (TWSE)", asOf: new Date().toISOString(),
+    source: otc
+      ? "證券櫃檯買賣中心 OpenAPI（基本資料／月營收／季報／股利／信用交易／重大訊息／櫃買指數）"
+      : "臺灣證券交易所 OpenAPI（基本資料／月營收／季報／股利／信用交易／重大訊息／大盤）＋ 證交所外資持股統計",
     profile: null, monthlyRevenue: null, quarterly: null, dividend: null,
     margin: null, foreign: null, announcements: null, marketIndex: null, notes: [] };
+  if (otc && [basic, rev, fin, div, margn, news, mkt].every((x) => x == null)) {
+    out.notes.push("櫃買中心資料暫時無法取得（連線受限），基本面暫不顯示。");
+  }
 
   // 公司基本資料 → 產業別、股本
   if (Array.isArray(basic)) {
@@ -518,9 +739,10 @@ async function buildExtra(code) {
   if (Array.isArray(margn)) {
     const r = margn.find((x) => codeOf(x) === code);
     if (r) {
-      const mb = num(pick(r, ["MarginBalanceToday", "融資今日餘額", "TodayBalance", "MarginBalance"]));
-      const mp = num(pick(r, ["MarginBalancePreviousDay", "融資前日餘額", "PreviousDayBalance"]));
-      const sb = num(pick(r, ["ShortBalanceToday", "融券今日餘額", "ShortBalance"]));
+      // 證交所為中文欄位；櫃買中心為 MarginPurchaseBalance／ShortSaleBalance 這類英文欄位
+      const mb = num(pick(r, ["MarginBalanceToday", "融資今日餘額", "MarginPurchaseBalance", "TodayBalance", "MarginBalance"]));
+      const mp = num(pick(r, ["MarginBalancePreviousDay", "融資前日餘額", "MarginPurchaseBalancePreviousDay", "PreviousDayBalance"]));
+      const sb = num(pick(r, ["ShortBalanceToday", "融券今日餘額", "ShortSaleBalance", "ShortBalance"]));
       out.margin = {
         unit: "張",
         marginBalanceLots: mb,
@@ -536,7 +758,8 @@ async function buildExtra(code) {
     const r = qfii20.find((x) => codeOf(x) === code);
     if (r) out.foreign = { holdingPct: num(pick(r, ["全體外資及陸資持股比率", "外資及陸資持股比率", "持股比率", "Shareholding"])) };
   }
-  if (!out.foreign && !qfiis) out.notes.push("外資持股資料暫時無法取得（證交所尚未公布或連線受限）。");
+  if (otc) out.notes.push("上櫃股票的外資持股比率目前沒有串接資料源，暫不顯示。");
+  else if (!out.foreign && !qfiis) out.notes.push("外資持股資料暫時無法取得（證交所尚未公布或連線受限）。");
   // 當日重大訊息（最多 3 則）
   if (Array.isArray(news)) {
     const rows = news.filter((x) => codeOf(x) === code);
@@ -547,12 +770,14 @@ async function buildExtra(code) {
       }));
     }
   }
-  // 大盤（加權指數）最新一日
+  // 大盤最新一日：上市看加權指數、上櫃看櫃買指數（櫃買指數檔的日期是西元 8 碼，排序不保證，取日期最新的一筆）
   if (Array.isArray(mkt) && mkt.length) {
-    const r = mkt[mkt.length - 1];
+    const dateOf = (r) => anyDateToISO(pick(r, ["Date", "日期"]));
+    const r = mkt.reduce((a, b) => (dateOf(b) > dateOf(a) ? b : a));
     out.marketIndex = {
-      date: anyDateToISO(pick(r, ["Date", "日期"])),
-      index: num(pick(r, ["TAIEX", "發行量加權股價指數"])),
+      name: otc ? "櫃買指數" : "加權指數",
+      date: dateOf(r),
+      index: num(pick(r, otc ? ["Close", "收盤指數"] : ["TAIEX", "發行量加權股價指數"])),
       change: num(pick(r, ["Change", "漲跌點數"]))
     };
   }
@@ -672,7 +897,7 @@ function sourcesOf(blocks) {
 const RESEARCH_SYS =
   "你是台股資深研究員助理，為想深入研究的一般投資人產出專業、精準但淺顯的研究內容。原則：\n" +
   "- 繁體中文、台灣慣用語；專有名詞第一次出現時用括號補一句白話。\n" +
-  "- 數據紀律：我方提供的證交所數據以其為準並標註日期；網路搜尋到的資訊標註來源與日期；查不到就明說「查無資料」，嚴禁編造數字。\n" +
+  "- 數據紀律：我方提供的證交所／櫃買中心數據以其為準並標註日期；網路搜尋到的資訊標註來源與日期；查不到就明說「查無資料」，嚴禁編造數字。\n" +
   "- 區分「事實」與「推論」；多空並陳、保持中立；不下『一定買／一定賣』等指令式建議。\n" +
   "- 用結構化 Markdown（##標題、表格、條列），開頭不要客套話。\n" +
   "- 結尾固定加一行：本內容由 AI 彙整，僅供研究參考，不構成投資建議，投資有風險，請自行評估並為自己的決策負責。";
@@ -686,7 +911,7 @@ function compactSrv(s) {
 }
 function cmdData(x) {
   let s = "";
-  if (x.snap || x.extra) s += "\n\n【個股最新數據（臺灣證交所，JSON）】\n```json\n" + JSON.stringify({ snapshot: x.snap, extra: x.extra }) + "\n```";
+  if (x.snap || x.extra) s += "\n\n【個股最新數據（證交所／櫃買中心，JSON；market 標示上市或上櫃）】\n```json\n" + JSON.stringify({ snapshot: x.snap, extra: x.extra }) + "\n```";
   if (x.screen) s += "\n\n【全市場掃描（臺灣證交所，JSON；lists 為五份榜單）】\n```json\n" + JSON.stringify(x.screen) + "\n```";
   if (x.watchTxt) s += "\n\n【使用者自選股清單】" + x.watchTxt;
   if (x.context) s += "\n\n【使用者先前建立的投資論點（原文）】\n" + x.context;
@@ -694,7 +919,7 @@ function cmdData(x) {
 }
 
 const CMD = {
-  "earnings-analysis": { needCode: true, web: 8, tokens: 8000, tpl: function (x) { return "指令：/earnings-analysis（財報深度研究報告）\n任務：撰寫 " + x.label + " 的完整財報研究報告，目標 3000～5000 字。\n步驟：先用網路搜尋找出最近一次財報與法說會重點（營收、毛利率、EPS、財測、管理層說法、法人問答焦點、市場預期比較），再結合下方證交所數據撰寫。\n輸出結構：\n1. 標題（公司、季度、撰寫日期）＋ 3～5 點摘要結論\n2. ## 本季關鍵數字（表格，附季增/年增，查得到市場預期就比較）\n3. ## 營運亮點與隱憂\n4. ## 管理層展望與財測\n5. ## 法說會問答重點\n6. ## 估值與同業比較\n7. ## 多空論點整理\n8. ## 風險\n9. ## 後續觀察指標與時點" + cmdData(x); } },
+  "earnings-analysis": { needCode: true, web: 8, tokens: 8000, tpl: function (x) { return "指令：/earnings-analysis（財報深度研究報告）\n任務：撰寫 " + x.label + " 的完整財報研究報告，目標 3000～5000 字。\n步驟：先用網路搜尋找出最近一次財報與法說會重點（營收、毛利率、EPS、財測、管理層說法、法人問答焦點、市場預期比較），再結合下方證交所／櫃買中心數據撰寫。\n輸出結構：\n1. 標題（公司、季度、撰寫日期）＋ 3～5 點摘要結論\n2. ## 本季關鍵數字（表格，附季增/年增，查得到市場預期就比較）\n3. ## 營運亮點與隱憂\n4. ## 管理層展望與財測\n5. ## 法說會問答重點\n6. ## 估值與同業比較\n7. ## 多空論點整理\n8. ## 風險\n9. ## 後續觀察指標與時點" + cmdData(x); } },
   "initiating-coverage": { needCode: true, web: 8, tokens: 8000, tpl: function (x) { return "指令：/initiating-coverage（首次覆蓋研究報告）\n任務：對 " + x.label + " 做機構級首次覆蓋報告，依五步驟撰寫長文：\n第一步 ## 公司與商業模式：產品組合、獲利方式、主要客戶與市場（需搜尋補足）\n第二步 ## 產業結構與競爭定位：產業鏈位置、競爭對手、護城河\n第三步 ## 財務體質與成長動能：用下方數據＋搜尋，看營收趨勢、獲利能力、配息\n第四步 ## 估值：至少三種角度交叉（本益比區間、股價淨值比、殖利率法、同業比較），列出計算假設\n第五步 ## 投資論點與風險：核心論點、關鍵假設、風險與失效條件、觀察指標" + cmdData(x); } },
   "earnings": { needCode: true, web: 4, tokens: 3000, tpl: function (x) { return "指令：/earnings（快速季度財報點評）\n任務：搜尋 " + x.label + " 最新一季財報重點，結合下方數據，輸出精簡點評（500～800 字）：\n1. 一句話結論\n2. ## 關鍵數字（表格：營收/毛利率/EPS 與季增年增）\n3. ## 三個亮點\n4. ## 三個疑慮\n5. ## 下季觀察重點" + cmdData(x); } },
   "initiate": { needCode: true, web: 3, tokens: 2500, tpl: function (x) { return "指令：/initiate（首次研究流程入口）\n任務：為 " + x.label + " 產出研究起手包：\n1. ## 公司一頁概覽（是做什麼的、賺什麼錢，搜尋補足）\n2. ## 該蒐集的資料清單（依優先順序）\n3. ## 關鍵問題清單（5～8 題，回答了就能形成觀點）\n4. ## 建議的後續指令（例如 /earnings-analysis、/thesis、/catalysts，說明各自時機）" + cmdData(x); } },
@@ -769,7 +994,7 @@ async function analyze(env, body) {
 
   const system =
     "你是專業、精準的台股分析助理，服務對象是想快速看懂個股的一般投資人。\n" +
-    "我已經先幫你抓好『臺灣證券交易所公開資料』的最新數據，直接放在使用者訊息裡。請【以這些數字為主】做分析，不要自行編造或用印象填補；資料裡沒有的就明說沒有，不要臆測。\n" +
+    "我已經先幫你抓好『臺灣證券交易所／證券櫃檯買賣中心公開資料』的最新數據（market 欄位標示上市或上櫃），直接放在使用者訊息裡。請【以這些數字為主】做分析，不要自行編造或用印象填補；資料裡沒有的就明說沒有，不要臆測。\n" +
     "輸出用繁體中文、台灣慣用語，語氣淺顯易懂（必須用到專有名詞時用括號補一句白話）。用精簡的結構化 Markdown：\n" +
     "1. 開頭一到兩句「結論」。\n" +
     "2. 「## 關鍵數據」：引用我給你的數字並標明日期。\n" +
@@ -793,7 +1018,7 @@ async function analyze(env, body) {
     userMsg =
       "股票：" + (name ? (name + "（" + code + "）") : code) + "\n" +
       "分析角度：" + focus + "\n\n" +
-      "以下是剛抓取的證交所資料（JSON）。price／valuation／institutional／history 為行情、估值、三大法人與走勢；" +
+      "以下是剛抓取的證交所／櫃買中心資料（JSON）。price／valuation／institutional／history 為行情、估值、三大法人與走勢；" +
       "extra（若有）為月營收、最新季 EPS、股利、融資融券、外資持股、重大訊息與大盤：\n```json\n" + JSON.stringify(snapshot, null, 2) + "\n```\n\n" +
       "請根據上面的數據，產出精簡、精準的分析。";
   }
@@ -836,7 +1061,10 @@ async function newsDigest(env, body) {
 // ---- 資料源健康檢查（/api/debug）----
 const RWD_SOURCES = { t86: fetchT86, qfiis: fetchQFIIS };
 
-async function sourceStatus(code) {
+const NO_DATA = "近 10 個交易日都查無資料，或連線受限";
+
+// code＝上市檢查用代號、otcCode＝上櫃檢查用代號
+async function sourceStatus(code, otcCode) {
   const timed = async (name, fn) => {
     const t0 = Date.now();
     try {
@@ -846,47 +1074,71 @@ async function sourceStatus(code) {
       return { name, ok: false, error: String((e && e.message) || e), ms: Date.now() - t0 };
     }
   };
-  const checks = Object.keys(OPENAPI).map((k) => timed("openapi:" + k, async () => {
-    const j = await oa(k, 600);
+  const openapiCheck = (prefix, keys, fetchKey) => keys.map((k) => timed(prefix + k, async () => {
+    const j = await fetchKey(k, 600);
     if (!Array.isArray(j)) return { ok: false, error: "回傳格式不是陣列" };
     const r0 = j[0] || {};
+    const d = pick(r0, ["Date", "出表日期"]);
     // 重大訊息當天沒有公告時本來就可能是空陣列
-    return { ok: j.length > 0 || k === "news", rows: j.length, date: r0.Date ? anyDateToISO(r0.Date) : (r0["出表日期"] ? anyDateToISO(r0["出表日期"]) : null) };
+    return { ok: j.length > 0 || k === "news", rows: j.length, date: d ? anyDateToISO(d) : null };
   }));
-  for (const k of Object.keys(RWD_SOURCES)) checks.push(timed("rwd:" + k, async () => {
-    const r = await RWD_SOURCES[k]();
-    if (!r) return { ok: false, error: "近 5 個交易日都查無資料，或連線受限" };
-    return { rows: Object.keys(r.byCode).length, date: r.date, hasCode: !!r.byCode[code] };
-  }));
-  checks.push(timed("rwd:stockDay(" + code + ")", async () => {
+  const instCheck = (name, fn, c) => timed(name, async () => {
+    const r = await fn();
+    if (!r) return { ok: false, error: NO_DATA };
+    return { rows: Object.keys(r.byCode).length, date: r.date, hasCode: !!r.byCode[c] };
+  });
+  const rtCheck = (c) => timed("mis:realtime(" + c + ")", async () => {
+    const rt = await fetchRealtime(c);
+    // 盤前／休市沒有即時成交是正常的，不算失敗
+    return rt ? { date: rt.date, time: rt.time, close: rt.close } : { ok: true, note: "目前沒有當盤成交（盤前或休市屬正常）" };
+  });
+
+  // 上市（證交所）
+  const twse = openapiCheck("openapi:", Object.keys(OPENAPI), oa);
+  for (const k of Object.keys(RWD_SOURCES)) twse.push(instCheck("rwd:" + k, RWD_SOURCES[k], code));
+  twse.push(timed("rwd:stockDay(" + code + ")", async () => {
     const h = await fetchHistory(code);
     return { ok: h.length > 0, rows: h.length, date: h.length ? h[h.length - 1].date : null };
   }));
-  checks.push(timed("mis:realtime(" + code + ")", async () => {
-    const rt = await fetchRealtime(code);
-    // 盤前／休市沒有即時成交是正常的，不算失敗
-    return rt ? { date: rt.date, time: rt.time, close: rt.close } : { ok: true, note: "目前沒有當盤成交（盤前或休市屬正常）" };
+  twse.push(rtCheck(code));
+  // 上櫃（櫃買中心）
+  const tpex = openapiCheck("tpex:openapi:", Object.keys(TPEX_OPENAPI), tpOa);
+  tpex.push(instCheck("tpex:www:inst", fetchTpexInst, otcCode));
+  tpex.push(timed("tpex:www:tradingStock(" + otcCode + ")", async () => {
+    const h = (await fetchTpexHistory(otcCode)).rows;
+    return { ok: h.length > 0, rows: h.length, date: h.length ? h[h.length - 1].date : null };
   }));
-  const sources = await Promise.all(checks);
-  return { ok: sources.every((s) => s.ok), code, checkedAt: new Date().toISOString(), sources };
+  tpex.push(rtCheck(otcCode));
+
+  const [a, b] = await Promise.all([Promise.all(twse), Promise.all(tpex)]);
+  const twseOk = a.every((s) => s.ok), tpexOk = b.every((s) => s.ok);
+  return { ok: twseOk && tpexOk, twseOk, tpexOk, code, otcCode, checkedAt: new Date().toISOString(), sources: a.concat(b) };
 }
 
 // /api/debug?ds=t86&code=2330 → 看欄位名稱與該代號那一列原始資料（欄位改版時用）
 async function sourceSample(ds, code) {
-  if (OPENAPI[ds]) {
-    const j = await oa(ds, 60);
+  if (OPENAPI[ds] || (ds.indexOf("tp_") === 0 && TPEX_OPENAPI[ds.slice(3)])) {
+    const j = OPENAPI[ds] ? await oa(ds, 60) : await tpOa(ds.slice(3), 60);
     if (!Array.isArray(j)) return { error: "fetch failed", type: typeof j };
     return { ds, rows: j.length, keys: j[0] ? Object.keys(j[0]) : [], sample: j.find((x) => codeOf(x) === code) || null };
   }
   if (ds === "t86" || ds === "qfiis") {
     const r = await twseLatest(ds === "t86" ? "fund/T86" : "fund/MI_QFIIS", { selectType: "ALLBUT0999" });
-    if (!r) return { ds, error: "近 5 個交易日都查無資料，或連線受限" };
+    if (!r) return { ds, error: NO_DATA };
     return { ds, date: r.date, rows: r.data.length, fields: r.fields,
       sample: r.data.find((row) => String(row[0] || "").trim() === code) || null, parsed: (await RWD_SOURCES[ds]() || { byCode: {} }).byCode[code] || null };
   }
+  if (ds === "tpexInst") {
+    const r = await tpexLatest("insti/dailyTrade", { type: "Daily", sect: "EW" });
+    if (!r) return { ds, error: NO_DATA };
+    return { ds, date: r.date, rows: r.data.length, fields: r.fields,
+      sample: r.data.find((row) => String(row[0] || "").trim() === code) || null, parsed: ((await fetchTpexInst()) || { byCode: {} }).byCode[code] || null };
+  }
   if (ds === "stockDay") return { ds, history: await fetchHistory(code) };
+  if (ds === "tpexDay") return { ds, history: await fetchTpexHistory(code) };
   if (ds === "realtime") return { ds, realtime: await fetchRealtime(code) };
-  return { error: "ds 可用值：" + Object.keys(OPENAPI).concat(["t86", "qfiis", "stockDay", "realtime"]).join("|") };
+  return { error: "ds 可用值：" + Object.keys(OPENAPI).concat(Object.keys(TPEX_OPENAPI).map((k) => "tp_" + k),
+    ["t86", "qfiis", "tpexInst", "stockDay", "tpexDay", "realtime"]).join("|") };
 }
 
 // ---- 路由 ----
@@ -921,8 +1173,9 @@ export default {
       if (url.pathname === "/api/debug") {
         const ds = url.searchParams.get("ds") || "";
         const dcode = (url.searchParams.get("code") || "2330").trim().toUpperCase();
-        if (!/^\d{4,6}[A-Z]?$/.test(dcode)) return json({ error: "請提供有效的股票代號（例如 2330）" }, 400);
-        if (!ds) return json(await sourceStatus(dcode));
+        const ocode = (url.searchParams.get("otc") || "6488").trim().toUpperCase();
+        if (!/^\d{4,6}[A-Z]?$/.test(dcode) || !/^\d{4,6}[A-Z]?$/.test(ocode)) return json({ error: "請提供有效的股票代號（例如 2330）" }, 400);
+        if (!ds) return json(await sourceStatus(dcode, ocode));
         return json(await sourceSample(ds, dcode));
       }
 
@@ -939,7 +1192,7 @@ export default {
       }
 
       if (url.pathname === "/" || url.pathname === "/api") {
-        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/screen", "GET /api/debug[?ds=t86&code=2330]", "POST /api/analyze", "POST /api/news", "POST /api/command"] });
+        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/screen", "GET /api/debug[?code=2330&otc=6488 | ?ds=t86&code=2330]", "POST /api/analyze", "POST /api/news", "POST /api/command"] });
       }
       return json({ error: "Not found" }, 404);
     } catch (e) {
