@@ -120,17 +120,27 @@ function twFetch(u, ttl) {
   return memo(u, ttl || 600, async () => {
     const url = new URL(u), isTpex = url.host === TPEX_HOST, tag = isTpex ? "TPEx" : "TWSE";
     const down = () => { if (isTpex) tpexDownUntil = Date.now() + TPEX_BACKOFF_MS; };
-    if (isTpex && Date.now() < tpexDownUntil) throw new Error("TPEx 剛才連線失敗，暫停重試 1 分鐘");
+    const pausedErr = () => new Error("TPEx 剛才連線失敗，暫停重試 1 分鐘");
+    if (isTpex && Date.now() < tpexDownUntil) throw pausedErr();
     // 只錯開網站端點；OpenAPI 是整包資料集、都有快取，不需要排隊
     if (THROTTLED[url.host] && url.pathname.indexOf("/openapi/") !== 0) await hostSlot(url.host);
+    // 排隊期間若已有其他請求發現櫃買中心連不上，就不要再打
+    if (isTpex && Date.now() < tpexDownUntil) throw pausedErr();
     let res;
     try {
       res = await fetch(u, {
         headers: { "User-Agent": UA, "Accept": "application/json" },
         cf: { cacheTtl: ttl || 600, cacheEverything: true },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        // 櫃買中心擋 Cloudflare 時會一路轉址到 /errors，每一跳都算一次子請求（免費方案每次最多 50 次）；
+        // 它的 JSON 端點本來就不會轉址，所以不跟隨，看到轉址就當成連不上
+        redirect: isTpex ? "manual" : "follow"
       });
     } catch (e) { down(); throw e; }
+    if (isTpex && ((res.status >= 300 && res.status < 400) || res.type === "opaqueredirect")) {
+      down();
+      throw new Error("TPEx 轉址 " + res.status + "（可能被擋）" + url.pathname);
+    }
     if (!res.ok) {
       if (res.status >= 500 || res.status === 403 || res.status === 429) down(); // 404 可能只是單一資料集改名，不算整站掛掉
       throw new Error(tag + " " + res.status + " " + url.pathname);
@@ -449,30 +459,42 @@ function appendLive(hist, rt) {
 // 上市全市場收盤檔筆數正常（上千檔）才拿來判斷市場；空陣列或殘缺時當作沒抓到，免得把上市股誤判成上櫃
 function listedOf(dayAll) { return Array.isArray(dayAll) && dayAll.length > 100 ? dayAll : null; }
 
-// 先看上市全市場收盤檔（通常已在快取）判斷上市或上櫃；即時行情同時發出，上市股不會因此變慢
-async function buildSnapshot(code) {
-  const rtP = fetchRealtime(code).catch(() => null);
+// 判斷上市或上櫃（/api/stock、/api/extra、/api/command 共用同一套規則，兩張卡片才不會互相矛盾）：
+//   上市全市場收盤檔有這檔 → 上市；否則看即時行情回報的市場；
+//   即時行情也沒有（盤前、興櫃、代號有誤）→ 收盤檔正常就推定上櫃（未確認），收盤檔也抓不到就無法判斷（null）
+// rtP 可由呼叫端先發出；沒給的話，只有在上市清單找不到時才去查即時行情
+async function marketOf(code, rtP) {
   const dayAll = await oa("dayAll", 600).catch(() => null);
   const listed = listedOf(dayAll);
-  if (listed && listed.some((r) => r.Code === code)) return buildTwseSnapshot(code, dayAll, rtP);
-  const rt = await rtP;
-  if (rt && rt.ex === "tse") return buildTwseSnapshot(code, dayAll, rtP);
-  // 不在上市清單、或即時行情說是上櫃 → 走上櫃
-  if (rt || listed) return buildOtcSnapshot(code, rt);
-  // 上市收盤檔與即時行情都抓不到：照舊先走上市，沒有價格再試上櫃
-  const s = await buildTwseSnapshot(code, dayAll, rtP);
+  if (listed && listed.some((r) => r.Code === code)) return { market: "tse", confirmed: true, dayAll };
+  const rt = await (rtP || fetchRealtime(code).catch(() => null));
+  if (rt) return { market: rt.ex, confirmed: true, dayAll };
+  return { market: listed ? "otc" : null, confirmed: false, dayAll };
+}
+
+// mkP／rtP 可由 /api/command 傳入，讓行情與基本面共用同一次判斷
+async function buildSnapshot(code, mkP, rtP) {
+  rtP = rtP || fetchRealtime(code).catch(() => null);
+  // 上市整包資料跟著判斷一起發出，上市股不用等判斷完才開始抓（上櫃股會多抓這兩份，但有快取，市場雷達也會用到）
+  const bwP = oa("bwibbu", 600).catch(() => null);
+  const t86P = fetchT86().catch(() => null);
+  // 個股日成交只對上市股有用：即時行情若比收盤檔先回來、而且確認是上市，就先開始抓
+  let histP = null;
+  const histOnce = () => histP || (histP = fetchHistory(code).catch(() => null));
+  rtP.then((rt) => { if (rt && rt.ex === "tse") histOnce(); });
+  const mk = await (mkP || marketOf(code, rtP));
+  const twse = () => buildTwseSnapshot(code, mk.dayAll, rtP, bwP, t86P, histOnce);
+  if (mk.market === "tse") return twse();
+  if (mk.market === "otc") return buildOtcSnapshot(code, await rtP, mk.confirmed);
+  // 無法判斷：照舊先走上市，沒有價格再試上櫃
+  const s = await twse();
   if (s.price) return s;
-  const o = await buildOtcSnapshot(code, null).catch(() => null);
+  const o = await buildOtcSnapshot(code, null, false).catch(() => null);
   return (o && o.price) ? o : s;
 }
 
-async function buildTwseSnapshot(code, dayAll, rtP) {
-  const [bwibbu, t86, hist, rt] = await Promise.all([
-    oa("bwibbu", 600).catch(() => null),
-    fetchT86().catch(() => null),
-    fetchHistory(code).catch(() => null),
-    rtP
-  ]);
+async function buildTwseSnapshot(code, dayAll, rtP, bwP, t86P, histOnce) {
+  const [bwibbu, t86, hist, rt] = await Promise.all([bwP, t86P, histOnce(), rtP]);
 
   const snap = {
     code, name: null, market: "上市 (TWSE)", asOf: new Date().toISOString(),
@@ -557,7 +579,8 @@ async function buildTwseSnapshot(code, dayAll, rtP) {
   return snap;
 }
 
-async function buildOtcSnapshot(code, rt) {
+// confirmed＝即時行情已確認是上櫃；false 代表只是「不在上市清單」推定的
+async function buildOtcSnapshot(code, rt, confirmed) {
   const [pe, inst, th] = await Promise.all([
     tpOa("pe", 600).catch(() => null),
     fetchTpexInst().catch(() => null),
@@ -613,6 +636,8 @@ async function buildOtcSnapshot(code, rt) {
   } else if (snap.price) {
     snap.notes.push("上櫃個股走勢暫時無法取得（櫃買中心連線受限），目前只顯示即時行情。");
   }
+  // 沒有任何上櫃資料認得這個代號（興櫃、打錯，或盤前且櫃買中心連不上）：不要標成上櫃，免得網頁與 AI 誤認
+  if (!confirmed && !hist && !snap.valuation && !snap.institutional) snap.market = null;
   return snap;
 }
 
@@ -633,14 +658,9 @@ function codeOf(r) {
   return String(v || "").trim();
 }
 
-// 上市全市場收盤檔裡沒有這檔 → 當上櫃；收盤檔抓不到時照舊當上市
-async function isOtc(code) {
-  const listed = listedOf(await oa("dayAll", 600).catch(() => null));
-  return !!listed && !listed.some((r) => r.Code === code);
-}
-
-async function buildExtra(code) {
-  const otc = await isOtc(code);
+async function buildExtra(code, mkP) {
+  const mk = await (mkP || marketOf(code));
+  const otc = mk.market === "otc";   // 無法判斷時照舊查上市資料
   const get = otc ? tpOa : oa;
   const [basic, rev, fin, div, margn, qfiis, qfii20, news, mkt] = await Promise.all([
     get("basic", 3600).catch(() => null),
@@ -751,6 +771,8 @@ async function buildExtra(code) {
       };
     }
   }
+  // 市場沒被上市清單或即時行情確認時，資料集裡也查不到這檔就不標市場（可能是興櫃或代號有誤）
+  if (!mk.confirmed && !(out.profile || out.monthlyRevenue || out.quarterly || out.dividend || out.margin)) out.market = null;
   // 外資及陸資持股比率（%）：完整名單優先，抓不到再看 OpenAPI 前 20 名
   if (qfiis && qfiis.byCode[code]) {
     out.foreign = Object.assign({ date: qfiis.date }, qfiis.byCode[code]);
@@ -758,7 +780,7 @@ async function buildExtra(code) {
     const r = qfii20.find((x) => codeOf(x) === code);
     if (r) out.foreign = { holdingPct: num(pick(r, ["全體外資及陸資持股比率", "外資及陸資持股比率", "持股比率", "Shareholding"])) };
   }
-  if (otc) out.notes.push("上櫃股票的外資持股比率目前沒有串接資料源，暫不顯示。");
+  if (otc) { if (out.market) out.notes.push("上櫃股票的外資持股比率目前沒有串接資料源，暫不顯示。"); }
   else if (!out.foreign && !qfiis) out.notes.push("外資持股資料暫時無法取得（證交所尚未公布或連線受限）。");
   // 當日重大訊息（最多 3 則）
   if (Array.isArray(news)) {
@@ -951,7 +973,10 @@ async function runCommand(env, body) {
 
   let snap = null, extra = null, screen = null;
   if (def.needCode) {
-    const pair = await Promise.all([buildSnapshot(code).catch(() => null), buildExtra(code).catch(() => null)]);
+    // 上市／上櫃只判斷一次，行情與基本面共用（結果一致，也少抓一次上市收盤檔）
+    const rtP = fetchRealtime(code).catch(() => null);
+    const mkP = marketOf(code, rtP);
+    const pair = await Promise.all([buildSnapshot(code, mkP, rtP).catch(() => null), buildExtra(code, mkP).catch(() => null)]);
     snap = compactSrv(pair[0]); extra = pair[1];
     if (extra) { delete extra.notes; }
   }
@@ -1176,7 +1201,9 @@ export default {
         const ocode = (url.searchParams.get("otc") || "6488").trim().toUpperCase();
         if (!/^\d{4,6}[A-Z]?$/.test(dcode) || !/^\d{4,6}[A-Z]?$/.test(ocode)) return json({ error: "請提供有效的股票代號（例如 2330）" }, 400);
         if (!ds) return json(await sourceStatus(dcode, ocode));
-        return json(await sourceSample(ds, dcode));
+        // 上櫃樣本（tp_*、tpexInst、tpexDay）沒指定 code 時改用 otc 代號
+        const tpexDs = ds.indexOf("tp_") === 0 || ds.indexOf("tpex") === 0;
+        return json(await sourceSample(ds, tpexDs && !url.searchParams.get("code") ? ocode : dcode));
       }
 
       if (url.pathname === "/api/analyze" && request.method === "POST") {

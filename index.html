@@ -491,6 +491,8 @@
   $("saveWorker").addEventListener("click", function(){
     var v = urlInput.value.trim().replace(/\/+$/,"");
     urlInput.value = v; lsSet("skyline_worker", v);
+    // 清空時改回預設網址（實際連線也會用它），狀態才不會顯示「尚未設定」卻仍在連預設 Worker
+    if(!v && DEFAULT_WORKER){ urlInput.value = DEFAULT_WORKER; setStatus("", "已設定（預設）"); testConn(); return; }
     if(v){ setStatus("", "已設定"); testConn(); } else setStatus("", "尚未設定");
   });
   function testConn(){
