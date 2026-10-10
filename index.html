@@ -135,6 +135,8 @@
   .stat-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;}
   .stat-name{font-family:var(--font-disp);font-size:21px;font-weight:700;line-height:1.15;}
   .stat-name .code{color:var(--muted);font-weight:500;font-size:15px;margin-left:8px;}
+  .stat-name .mkt{display:inline-block;vertical-align:3px;margin-left:8px;font-family:var(--font-body);font-size:11.5px;font-weight:600;
+    color:var(--sky-deep);background:var(--mist-2);border:1px solid var(--line);border-radius:999px;padding:1px 8px;}
   .stat-right{display:flex;align-items:center;gap:8px;}
   .stat-date{font-size:12px;color:var(--muted);background:var(--mist-2);border:1px solid var(--line);border-radius:999px;
     padding:5px 11px;white-space:nowrap;}
@@ -296,10 +298,10 @@
       </div>
       <div>
         <div class="brand-name">台股天際線</div>
-        <div class="brand-sub">秒讀證交所數據 · Claude 精準分析</div>
+        <div class="brand-sub">秒讀上市櫃數據 · Claude 精準分析</div>
       </div>
     </div>
-    <span class="live-pill"><span class="live-dot"></span>直連 TWSE</span>
+    <span class="live-pill"><span class="live-dot"></span>直連 TWSE · TPEx</span>
   </header>
 
   <details class="cfg" id="cfg">
@@ -308,7 +310,7 @@
       <input id="workerUrl" class="cfg-input" type="text" placeholder="https://你的-worker.workers.dev" autocomplete="off" spellcheck="false" />
       <button id="saveWorker" class="btn-sm primary">儲存</button>
       <button id="testWorker" class="btn-sm ghost">測試連線</button>
-      <div class="cfg-hint">貼上你部署好的 Cloudflare Worker 網址（不含結尾斜線）。程式會呼叫 <code>/api/stock</code>、<code>/api/extra</code> 與 <code>/api/analyze</code>；證交所資料源是否正常可直接開 <code>/api/debug</code> 檢查。</div>
+      <div class="cfg-hint">貼上你部署好的 Cloudflare Worker 網址（不含結尾斜線）。程式會呼叫 <code>/api/stock</code>、<code>/api/extra</code> 與 <code>/api/analyze</code>；證交所／櫃買中心資料源是否正常可直接開 <code>/api/debug</code> 檢查。</div>
     </div>
   </details>
 
@@ -332,10 +334,10 @@
     </div>
 
     <div id="modeStock">
-    <p class="panel-lead">輸入股票，先<b>秒讀證交所即時數據</b>，再交給 Claude 依這些真實數字做精準分析。</p>
+    <p class="panel-lead">輸入上市或上櫃股票，先<b>秒讀證交所／櫃買中心即時數據</b>，再交給 Claude 依這些真實數字做精準分析。</p>
     <p class="field-label">分析標的</p>
     <div class="search-row">
-      <input id="q" class="search-input" type="text" inputmode="numeric" placeholder="輸入股票代號，例如 2330" autocomplete="off" aria-label="股票代號" />
+      <input id="q" class="search-input" type="text" inputmode="numeric" placeholder="輸入股票代號，例如 2330、6488" autocomplete="off" aria-label="股票代號" />
       <button id="go" class="btn btn-primary">秒讀＋分析</button>
     </div>
     <div class="chips-row" id="recentRow" style="display:none;">
@@ -353,7 +355,7 @@
              placeholder="代號＋名稱（例：2330 台積電）" autocomplete="off" />
       <button class="btn-sm primary" id="watchAddBtn">加入</button>
     </div>
-    <p class="hint" id="hint">請先輸入股票代號（上市 4 位數字）。</p>
+    <p class="hint" id="hint">請先輸入股票代號（上市、上櫃皆可，例如 2330、6488）。</p>
 
     <div class="divider"></div>
     <p class="field-label">分析角度</p>
@@ -378,7 +380,7 @@
     </div>
 
     <div id="modeCmd" style="display:none;">
-      <p class="panel-lead">15 個<b>研究指令</b>：結合證交所最新數據與網路搜尋，產出結構化的研究報告。先選指令，再填代號或主題。</p>
+      <p class="panel-lead">15 個<b>研究指令</b>：結合證交所／櫃買中心最新數據與網路搜尋，產出結構化的研究報告。先選指令，再填代號或主題。</p>
       <div id="cmdGroups"></div>
       <div class="cmd-detail" id="cmdDetail"></div>
       <div class="cmd-hist" id="cmdHist"></div>
@@ -395,7 +397,7 @@
     </div>
     <div id="cmdResMeta" class="data-date" style="margin:0 0 4px;"></div>
     <div id="cmdResArea"></div>
-    <div class="disclaimer">研究內容由 Claude 依證交所公開數據與網路搜尋彙整，可能有遺漏或錯誤，重要數字請以原始資料為準。僅供研究參考，<b>不構成投資建議</b>。</div>
+    <div class="disclaimer">研究內容由 Claude 依證交所／櫃買中心公開數據與網路搜尋彙整，可能有遺漏或錯誤，重要數字請以原始資料為準。僅供研究參考，<b>不構成投資建議</b>。</div>
   </section>
 
   <section class="panel" id="newsWrap" style="display:none;">
@@ -437,12 +439,12 @@
         <button class="an-tab" data-scen="value">價值評估</button>
       </div>
       <div id="anArea"></div>
-      <div class="disclaimer">分析由 Claude 依證交所公開資料生成，可能有延遲或誤差，僅供參考，<b>不構成投資建議</b>。投資有風險，請自行評估並為自己的決策負責。</div>
+      <div class="disclaimer">分析由 Claude 依證交所／櫃買中心公開資料生成，可能有延遲或誤差，僅供參考，<b>不構成投資建議</b>。投資有風險，請自行評估並為自己的決策負責。</div>
     </div>
   </section>
 
   <footer class="foot">
-    資料來源 · 臺灣證券交易所 OpenAPI（收盤／估值／月營收／EPS／股利／融資融券／重大訊息）、證交所三大法人與外資持股統計、盤中即時行情<br/>
+    資料來源 · 臺灣證券交易所 OpenAPI（收盤／估值／月營收／EPS／股利／融資融券／重大訊息）、證交所三大法人與外資持股統計、證券櫃檯買賣中心（上櫃行情／估值／三大法人／基本面）、盤中即時行情<br/>
     前端 GitHub Pages · 後端 Cloudflare Worker · 分析由 Claude 產生
   </footer>
 </div>
@@ -452,7 +454,7 @@
   "use strict";
 
   // ====== 可直接把你的 Worker 網址寫死在這裡（免每次貼）======
-  var DEFAULT_WORKER = "";   // 例如 "https://taigu.你的帳號.workers.dev"
+  var DEFAULT_WORKER = "https://stock.skyzbpt.workers.dev";   // 裝置上另存的網址會優先使用
 
   var SCEN = {
     overview:{label:"綜合研判"}, technical:{label:"技術面"}, chips:{label:"法人籌碼"},
@@ -489,6 +491,8 @@
   $("saveWorker").addEventListener("click", function(){
     var v = urlInput.value.trim().replace(/\/+$/,"");
     urlInput.value = v; lsSet("skyline_worker", v);
+    // 清空時改回預設網址（實際連線也會用它），狀態才不會顯示「尚未設定」卻仍在連預設 Worker
+    if(!v && DEFAULT_WORKER){ urlInput.value = DEFAULT_WORKER; setStatus("", "已設定（預設）"); testConn(); return; }
     if(v){ setStatus("", "已設定"); testConn(); } else setStatus("", "尚未設定");
   });
   function testConn(){
@@ -670,6 +674,7 @@
     var chgTxt = (chg==null) ? "" : (sign(chg)+fmt(chg,2)+(pct==null?"":"  ("+sign(pct)+fmt(pct,2)+"%)"));
     var c = cls(chg==null?0:chg);
     var sp = sparkline(snap.history);
+    var mkt = /上櫃/.test(snap.market||"") ? "上櫃" : (/上市/.test(snap.market||"") ? "上市" : "");
 
     var cells = [
       ["開盤", fmt(p.open,2)], ["最高", fmt(p.high,2)], ["最低", fmt(p.low,2)],
@@ -687,7 +692,7 @@
 
     statCard.innerHTML =
       '<div class="stat fade">'
-      + '<div class="stat-top"><div class="stat-name">'+esc(name)+'<span class="code">'+esc(snap.code)+'</span></div>'
+      + '<div class="stat-top"><div class="stat-name">'+esc(name)+'<span class="code">'+esc(snap.code)+'</span>'+(mkt?'<span class="mkt">'+mkt+'</span>':'')+'</div>'
       + '<div class="stat-right"><span class="stat-date">'+esc(dateTxt)+'</span>'
       + '<button class="icon-btn'+(isWatched(snap.code)?" star-on":"")+'" id="starBtn" title="加入自選股" aria-label="加入自選股">'
       + '<svg viewBox="0 0 24 24" fill="'+(isWatched(snap.code)?"currentColor":"none")+'" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>'
@@ -743,7 +748,7 @@
     }).join("");
 
     var mkHtml = (mk && mk.index!=null)
-      ? '<span class="ex-mkt">加權指數 <b>'+fmt(mk.index,2)+'</b> '+(mk.change!=null?'<span class="'+cls(mk.change)+'">'+sign(mk.change)+fmt(mk.change,2)+'</span>':'')
+      ? '<span class="ex-mkt">'+esc(mk.name||"加權指數")+' <b>'+fmt(mk.index,2)+'</b> '+(mk.change!=null?'<span class="'+cls(mk.change)+'">'+sign(mk.change)+fmt(mk.change,2)+'</span>':'')
         + (mk.date?' · '+esc(mmdd(mk.date)):'')+'</span>' : '';
 
     var annHtml = "";
@@ -884,7 +889,7 @@
       .catch(function(err){
         busy=false; goEl.disabled=false;
         statCard.innerHTML=""; extraCard.innerHTML=""; resultEl.classList.remove("show");
-        showErr(err.message+"　（請確認 Worker 已部署、網址正確；可開啟 Worker 網址加上 /api/debug 檢查證交所資料源）");
+        showErr(err.message+"　（請確認 Worker 已部署、網址正確；可開啟 Worker 網址加上 /api/debug 檢查證交所／櫃買中心資料源）");
       });
   }
 
@@ -1187,7 +1192,7 @@
     { k:"catalyst-calendar", g:"market", t:"自選股行事曆", need:"watch", eta:"約 2 分鐘",
       d:"把每一檔自選股未來的財報法說、除權息、產品與政策事件，整理成一份依日期排序的行事曆。" }
   ];
-  var CMD_MSGS = ["讀取證交所最新數據…","上網搜尋最新資訊…","交叉比對數據與新聞…","撰寫研究報告中…","整理表格與重點…"];
+  var CMD_MSGS = ["讀取證交所／櫃買中心最新數據…","上網搜尋最新資訊…","交叉比對數據與新聞…","撰寫研究報告中…","整理表格與重點…"];
   var CMD_MSGS_LOCAL = ["掃描全市場數據…","依條件比對中…","整理篩選結果…"];
   var cmd = { sel:"initiate", code:"", args:{}, busy:false, shown:false, timer:null, item:null };
 
@@ -1221,7 +1226,7 @@
 
   function cmdCheck(){
     var c=cmdDef(cmd.sel), watch=loadWatch(), tail=c.deep ? "　長文報告會用掉較多 AI 額度。" : "";
-    if(needsCode(c) && !/^\d{4,6}[A-Z]?$/.test(cmd.code)) return { ok:false, msg:"請輸入股票代號（上市股票，例如 2330）。"+tail };
+    if(needsCode(c) && !/^\d{4,6}[A-Z]?$/.test(cmd.code)) return { ok:false, msg:"請輸入股票代號（上市或上櫃，例如 2330、6488）。"+tail };
     if(c.need==="thesis"){
       var th=loadTheses()[cmd.code];
       if(!th) return { ok:false, warn:true, msg:"還沒有 "+cmd.code+" 的投資論點，請先執行「建立投資論點」，完成後會自動存起來。", fix:"thesis" };
