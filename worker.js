@@ -17,8 +17,9 @@
  * 櫃買中心資料來源（上櫃）：
  *   - OpenAPI（www.tpex.org.tw/openapi/v1）：估值、融資融券、櫃買指數、基本資料、月營收、EPS、股利、重大訊息
  *   - 網站端點（www.tpex.org.tw/www/zh-tw）：三大法人買賣明細、個股日成交
- *   - 有開源專案回報櫃買中心會擋 Cloudflare 機房發出的請求（回 520），所以上櫃資料全部當「選配」：
- *     抓不到就加註說明，行情改靠即時快照，不影響上市股票。部署後請用 /api/debug 確認。
+ *   - 櫃買中心會擋 Cloudflare 機房發出的請求（2026-10 實測：一律回 302 轉址），抓不到時改用 FinMind 備援
+ *     （api.finmindtrade.com，資料取自證交所／櫃買中心）；兩邊都抓不到才只顯示即時行情。不影響上市股票。
+ *     部署後請用 /api/debug 確認（tpexVia 會顯示目前走櫃買中心還是 FinMind）。
  *
  * 為什麼要有這個後端：
  *   1. 證交所 API 從瀏覽器直接打會有 CORS 問題；從 Worker（伺服器端）打沒有這個限制，還能快取。
@@ -26,6 +27,7 @@
  *
  * 部署後要做：
  *   - 設定密鑰：wrangler secret put ANTHROPIC_API_KEY   （或在 Dashboard → Settings → Variables 加密變數）
+ *   - 選配：FINMIND_TOKEN（finmindtrade.com 免費註冊），提高上櫃備援資料的每小時額度
  *   - 建議把下方 ALLOW_ORIGIN 改成你的網域，例如 "https://skyzbpt.github.io"
  */
 
@@ -459,6 +461,183 @@ async function fetchTpexHistory(code) {
   return { name, rows: rows.slice(-40) };
 }
 
+// ---- FinMind（上櫃資料備援）----
+// 櫃買中心封鎖 Cloudflare 機房 IP（2026-10 實測：每個端點都在 10ms 內回 302），從台灣家用網路則正常。
+// FinMind 的資料取自證交所／櫃買中心，可從 Cloudflare 連線，所以櫃買中心抓不到時改用它補上。
+// 匿名每小時約 300 次（以出口 IP 計，Cloudflare 出口是多人共用）；設定 Worker 密鑰 FINMIND_TOKEN（免費註冊）可提高額度。
+// 欄位名稱已用 6488 實測確認（2026-10-10）。
+const FINMIND_URL = "https://api.finmindtrade.com/api/v4/data";
+let FINMIND_TOKEN = "";   // 由 fetch handler 從 env 帶入
+function isoDaysAgo(days) {
+  const d = twNow(); d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+// 回傳 data 陣列；FinMind 額度用完或參數錯誤時 status 不是 200，會丟錯
+function fmFetch(dataset, params, ttl) {
+  const qs = new URLSearchParams(Object.assign({ dataset }, params || {}));
+  const key = "FM:" + qs.toString();            // 快取鍵不含 token
+  if (FINMIND_TOKEN) qs.set("token", FINMIND_TOKEN); // 用查詢參數而不是 Authorization 標頭，邊緣快取才會生效
+  return memo(key, ttl || 1800, async () => {
+    const res = await fetch(FINMIND_URL + "?" + qs.toString(), {
+      headers: { "User-Agent": UA, "Accept": "application/json" },
+      cf: { cacheTtl: ttl || 1800, cacheEverything: true },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
+    const j = await res.json().catch(() => null);
+    if (!res.ok || !j || j.status !== 200 || !Array.isArray(j.data)) {
+      throw new Error("FinMind " + ((j && (j.status + " " + (j.msg || ""))) || res.status) + " " + dataset);
+    }
+    return j.data;
+  });
+}
+function fmStock(dataset, code, days, ttl) {
+  return fmFetch(dataset, { data_id: code, start_date: isoDaysAgo(days) }, ttl);
+}
+const lastOf = (a) => (Array.isArray(a) && a.length ? a[a.length - 1] : null);
+const rocYear = (y) => (y ? String(parseInt(y, 10) - 1911) : "");
+
+// 日成交 → 與 fetchTpexHistory 相同格式 { name, rows }
+async function fmHistory(code) {
+  const d = await fmStock("TaiwanStockPrice", code, 70, 1800);
+  const rows = d.filter((x) => num(x.close) != null && num(x.close) > 0).map((x) => ({
+    date: x.date, close: num(x.close), open: num(x.open), high: num(x.max), low: num(x.min), change: num(x.spread),
+    volumeLots: num(x.Trading_Volume) != null ? Math.round(num(x.Trading_Volume) / 1000) : null,
+    tradeValue: num(x.Trading_money), transactions: num(x.Trading_turnover)
+  }));
+  return { name: null, rows: rows.slice(-40) };
+}
+// 本益比／殖利率／股價淨值比（最新一日）
+async function fmValuation(code) {
+  const r = lastOf(await fmStock("TaiwanStockPER", code, 14, 1800));
+  return r ? { date: r.date, pe: num(r.PER), dividendYield: num(r.dividend_yield), pb: num(r.PBR) } : null;
+}
+// 三大法人（最新一日；股 → 張，外資含外資自營商，自營商＝自行買賣＋避險）
+async function fmInstitutional(code) {
+  const d = await fmStock("TaiwanStockInstitutionalInvestorsBuySell", code, 14, 1800);
+  const last = lastOf(d);
+  if (!last) return null;
+  const net = {};
+  for (const x of d) if (x.date === last.date) net[x.name] = (num(x.buy) || 0) - (num(x.sell) || 0);
+  const sum = (...ks) => (ks.some((k) => net[k] != null) ? ks.reduce((s, k) => s + (net[k] || 0), 0) : null);
+  const lots = (v) => (v == null ? null : Math.round(v / 1000));
+  const foreign = sum("Foreign_Investor", "Foreign_Dealer_Self");
+  const trust = sum("Investment_Trust");
+  const dealer = net.Dealer != null ? net.Dealer : sum("Dealer_self", "Dealer_Hedging");
+  const parts = [foreign, trust, dealer].filter((v) => v != null);
+  return { date: last.date, foreignLots: lots(foreign), trustLots: lots(trust), dealerLots: lots(dealer),
+    totalLots: parts.length ? lots(parts.reduce((a, b) => a + b, 0)) : null };
+}
+// 基本面：產業、股本、月營收、季報、股利、融資融券、外資持股。各項獨立，單項失敗不影響其他項
+async function fmExtra(code) {
+  const settle = (p) => p.catch(() => null);
+  const [info, rev, fin, div, margin, hold] = await Promise.all([
+    settle(fmFetch("TaiwanStockInfo", { data_id: code }, 86400)),
+    settle(fmStock("TaiwanStockMonthRevenue", code, 430, 21600)),
+    settle(fmStock("TaiwanStockFinancialStatements", code, 400, 43200)),
+    settle(fmStock("TaiwanStockDividend", code, 800, 43200)),
+    settle(fmStock("TaiwanStockMarginPurchaseShortSale", code, 14, 1800)),
+    settle(fmStock("TaiwanStockShareholding", code, 14, 1800))
+  ]);
+  const out = { profile: null, monthlyRevenue: null, quarterly: null, dividend: null, margin: null, foreign: null,
+    any: [info, rev, fin, div, margin, hold].some((x) => Array.isArray(x)) };
+
+  const inf = Array.isArray(info) ? (info.find((x) => x.type === "tpex") || info[0]) : null;
+  const h = lastOf(hold);
+  const shares = h ? num(h.NumberOfSharesIssued) : null;
+  if (inf || shares != null) {
+    out.profile = {
+      industry: (inf && String(inf.industry_category || "").trim()) || null,
+      sharesB: shares != null ? +(shares / 1e8).toFixed(2) : null,
+      capitalB: shares != null ? +(shares * 10 / 1e8).toFixed(1) : null,   // 以面額 10 元推算
+      unit: "sharesB=億股, capitalB=億元"
+    };
+  }
+  out.name = (inf && inf.stock_name) || (h && h.stock_name) || null;
+
+  // 月營收（元 → 億元）；年增、月增、累計自行計算
+  if (Array.isArray(rev) && rev.length) {
+    const byYm = {};
+    for (const x of rev) byYm[x.revenue_year + "-" + x.revenue_month] = num(x.revenue);
+    const r = rev.reduce((a, b) => ((b.revenue_year * 100 + b.revenue_month) > (a.revenue_year * 100 + a.revenue_month) ? b : a));
+    const y = r.revenue_year, m = r.revenue_month, cur = num(r.revenue);
+    const prevM = m === 1 ? byYm[(y - 1) + "-12"] : byYm[y + "-" + (m - 1)];
+    const lastY = byYm[(y - 1) + "-" + m];
+    const pct = (a, b) => (a != null && b ? +((a - b) / b * 100).toFixed(2) : null);
+    let ytd = 0, ytdPrev = 0, okYtd = true;
+    for (let i = 1; i <= m; i++) {
+      const a = byYm[y + "-" + i], b = byYm[(y - 1) + "-" + i];
+      if (a == null || b == null) { okYtd = false; break; }
+      ytd += a; ytdPrev += b;
+    }
+    out.monthlyRevenue = {
+      ym: rocYear(y) + String(m).padStart(2, "0"),
+      revenueB: cur != null ? +(cur / 1e8).toFixed(2) : null,
+      momPct: pct(cur, prevM), yoyPct: pct(cur, lastY),
+      ytdB: okYtd ? +(ytd / 1e8).toFixed(1) : null, ytdYoyPct: okYtd ? pct(ytd, ytdPrev) : null,
+      unit: "revenueB/ytdB=億元, 其餘=%"
+    };
+  }
+  // 最新一季損益表（元 → 億元）
+  const fl = lastOf(fin);
+  if (fl) {
+    const v = {};
+    for (const x of fin) if (x.date === fl.date) v[x.type] = num(x.value);
+    const rv = v.Revenue, gp = v.GrossProfit, op = v.OperatingIncome;
+    const ni = v.EquityAttributableToOwnersOfParent != null ? v.EquityAttributableToOwnersOfParent : v.IncomeAfterTaxes;
+    const mm = parseInt(fl.date.slice(5, 7), 10);
+    out.quarterly = {
+      period: rocYear(fl.date.slice(0, 4)) + " Q" + Math.ceil(mm / 3),
+      eps: v.EPS != null ? v.EPS : null,
+      revenueB: rv != null ? +(rv / 1e8).toFixed(1) : null,
+      grossMarginPct: (rv && gp != null) ? +(gp / rv * 100).toFixed(2) : null,
+      operatingMarginPct: (rv && op != null) ? +(op / rv * 100).toFixed(2) : null,
+      netMarginPct: (rv && ni != null) ? +(ni / rv * 100).toFixed(2) : null,
+      netIncomeB: ni != null ? +(ni / 1e8).toFixed(1) : null
+    };
+  }
+  // 最新一期股利（元/股）
+  const dv = lastOf(div);
+  if (dv) {
+    const c1 = num(dv.CashEarningsDistribution), c2 = num(dv.CashStatutorySurplus);
+    const s1 = num(dv.StockEarningsDistribution), s2 = num(dv.StockStatutorySurplus);
+    out.dividend = {
+      year: String(dv.year || "").trim() || null,
+      cash: (c1 != null || c2 != null) ? +(((c1 || 0) + (c2 || 0)).toFixed(4)) : null,
+      stock: (s1 != null || s2 != null) ? +(((s1 || 0) + (s2 || 0)).toFixed(4)) : null
+    };
+  }
+  // 融資融券餘額（FinMind 單位已是張）
+  const mg = lastOf(margin);
+  if (mg) {
+    const mb = num(mg.MarginPurchaseTodayBalance), mp = num(mg.MarginPurchaseYesterdayBalance);
+    out.margin = { unit: "張", marginBalanceLots: mb, marginChangeLots: (mb != null && mp != null) ? mb - mp : null,
+      shortBalanceLots: num(mg.ShortSaleTodayBalance) };
+  }
+  // 外資持股比率
+  if (h && num(h.ForeignInvestmentSharesRatio) != null) {
+    out.foreign = { date: h.date, holdingPct: num(h.ForeignInvestmentSharesRatio), limitPct: num(h.ForeignInvestmentUpperLimitRatio) };
+  }
+  return out;
+}
+
+// 櫃買指數：櫃買中心 OpenAPI 抓不到時，改用 TWSE MIS 即時行情的指數代號 otc_o00
+async function fetchOtcIndexRt() {
+  const res = await fetch("https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_o00.tw&json=1&delay=0", {
+    headers: { "User-Agent": UA, "Accept": "application/json", "Referer": "https://mis.twse.com.tw/stock/index.jsp" },
+    cf: { cacheTtl: 60, cacheEverything: true },
+    signal: AbortSignal.timeout(RT_TIMEOUT_MS)
+  });
+  if (!res.ok) throw new Error("MIS " + res.status);
+  const j = await res.json().catch(() => null);
+  const m = j && Array.isArray(j.msgArray) && j.msgArray[0];
+  if (!m) throw new Error("MIS 查無櫃買指數");
+  const z = num(m.z), y = num(m.y);
+  if (z == null) throw new Error("MIS 櫃買指數目前沒有數值");
+  const iso = anyDateToISO(m.d);
+  return { name: "櫃買指數", date: /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : null, index: z,
+    change: y != null ? +(z - y).toFixed(2) : null };
+}
+
 // 盤中／當日即時快照優先（解決全市場收盤檔更新延遲的問題）
 function applyRealtime(snap, rt, source) {
   if (!rt || rt.close == null) return;
@@ -611,12 +790,25 @@ async function buildTwseSnapshot(code, dayAll, rtP, bwP, t86P, histOnce) {
 
 // confirmed＝即時行情已確認是上櫃；false 代表只是「不在上市清單」推定的
 async function buildOtcSnapshot(code, rt, confirmed) {
-  const [pe, inst, th] = await Promise.all([
+  let [pe, inst, th] = await Promise.all([
     fetchTpexPe().catch(() => null),
     fetchTpexInst().catch(() => null),
     fetchTpexHistory(code).catch(() => null)
   ]);
-  const SRC = "證券櫃檯買賣中心（櫃買中心）";
+  // 櫃買中心缺的部分改用 FinMind 補（櫃買中心擋 Cloudflare 時三項都會缺）
+  const needHist = !(th && th.rows.length), needPe = !(pe && pe.byCode[code]), needInst = !(inst && inst.byCode[code]);
+  let viaFm = false;
+  if (needHist || needPe || needInst) {
+    const [fh, fv, fi] = await Promise.all([
+      needHist ? fmHistory(code).catch(() => null) : null,
+      needPe ? fmValuation(code).catch(() => null) : null,
+      needInst ? fmInstitutional(code).catch(() => null) : null
+    ]);
+    if (fh && fh.rows.length) { th = { name: th && th.name, rows: fh.rows }; viaFm = true; }
+    if (fv) { pe = { byCode: { [code]: fv } }; viaFm = true; }
+    if (fi) { inst = { date: fi.date, byCode: { [code]: fi } }; viaFm = true; }
+  }
+  const SRC = viaFm ? "證券櫃檯買賣中心（經 FinMind 轉接）" : "證券櫃檯買賣中心（櫃買中心）";
   const hist = th && th.rows.length ? th.rows : null;
   const snap = {
     code, name: (th && th.name) || null, market: "上櫃 (TPEx)", asOf: new Date().toISOString(),
@@ -703,9 +895,7 @@ async function buildExtra(code, mkP) {
       : "臺灣證券交易所 OpenAPI（基本資料／月營收／季報／股利／信用交易／重大訊息／大盤）＋ 證交所外資持股統計",
     profile: null, monthlyRevenue: null, quarterly: null, dividend: null,
     margin: null, foreign: null, announcements: null, marketIndex: null, notes: [] };
-  if (otc && [basic, rev, fin, div, margn, news, mkt].every((x) => x == null)) {
-    out.notes.push("櫃買中心資料暫時無法取得（連線受限），基本面暫不顯示。");
-  }
+  const tpexAllDown = otc && [basic, rev, fin, div, margn, news, mkt].every((x) => x == null);
 
   // 公司基本資料 → 產業別、股本
   if (Array.isArray(basic)) {
@@ -795,6 +985,23 @@ async function buildExtra(code, mkP) {
       };
     }
   }
+  // 上櫃：櫃買中心缺的項目改用 FinMind 補（櫃買中心擋 Cloudflare 時全部都會缺）
+  let fmUsed = false;
+  if (otc && !(out.profile && out.monthlyRevenue && out.quarterly && out.dividend && out.margin)) {
+    const fm = await fmExtra(code).catch(() => null);
+    if (fm && fm.any) {
+      for (const k of ["profile", "monthlyRevenue", "quarterly", "dividend", "margin", "foreign"]) {
+        if (!out[k] && fm[k]) { out[k] = fm[k]; fmUsed = true; }
+      }
+    }
+  }
+  if (fmUsed) {
+    out.source = tpexAllDown
+      ? "FinMind（資料來自證交所／櫃買中心；櫃買中心目前擋雲端主機連線）＋ 即時行情櫃買指數"
+      : out.source + " ＋ FinMind 補缺";
+  } else if (tpexAllDown) {
+    out.notes.push("櫃買中心與 FinMind 備援都暫時無法取得資料，基本面暫不顯示。");
+  }
   // 市場沒被上市清單或即時行情確認時，資料集裡也查不到這檔就不標市場（可能是興櫃或代號有誤）
   if (!mk.confirmed && !(out.profile || out.monthlyRevenue || out.quarterly || out.dividend || out.margin)) out.market = null;
   // 外資及陸資持股比率（%）：完整名單優先，抓不到再看 OpenAPI 前 20 名
@@ -804,7 +1011,7 @@ async function buildExtra(code, mkP) {
     const r = qfii20.find((x) => codeOf(x) === code);
     if (r) out.foreign = { holdingPct: num(pick(r, ["全體外資及陸資持股比率", "外資及陸資持股比率", "持股比率", "Shareholding"])) };
   }
-  if (otc) { if (out.market) out.notes.push("上櫃股票的外資持股比率目前沒有串接資料源，暫不顯示。"); }
+  if (otc) { if (out.market && !out.foreign) out.notes.push("上櫃股票的外資持股比率暫時無法取得，暫不顯示。"); }
   else if (!out.foreign && !qfiis) out.notes.push("外資持股資料暫時無法取得（證交所尚未公布或連線受限）。");
   // 當日重大訊息（最多 3 則）
   if (Array.isArray(news)) {
@@ -827,6 +1034,7 @@ async function buildExtra(code, mkP) {
       change: num(pick(r, ["Change", "漲跌點數"]))
     };
   }
+  if (otc && !out.marketIndex) out.marketIndex = await fetchOtcIndexRt().catch(() => null);
   return out;
 }
 
@@ -1162,11 +1370,27 @@ async function sourceStatus(code, otcCode) {
     const h = (await fetchTpexHistory(otcCode)).rows;
     return { ok: h.length > 0, rows: h.length, date: h.length ? h[h.length - 1].date : null };
   }));
-  tpex.push(rtCheck(otcCode));
+  // 上櫃備援（FinMind）＋ 櫃買指數（即時行情）
+  const fmCheck = (ds, days) => timed("finmind:" + ds + "(" + otcCode + ")", async () => {
+    const d = ds === "TaiwanStockInfo" ? await fmFetch(ds, { data_id: otcCode }, 600) : await fmStock(ds, otcCode, days, 600);
+    const last = lastOf(d);
+    return { ok: d.length > 0, rows: d.length, date: last ? last.date : null };
+  });
+  const fm = [
+    fmCheck("TaiwanStockPrice", 70), fmCheck("TaiwanStockPER", 14), fmCheck("TaiwanStockInstitutionalInvestorsBuySell", 14),
+    fmCheck("TaiwanStockInfo"), fmCheck("TaiwanStockMonthRevenue", 430), fmCheck("TaiwanStockFinancialStatements", 400),
+    fmCheck("TaiwanStockDividend", 800), fmCheck("TaiwanStockMarginPurchaseShortSale", 14), fmCheck("TaiwanStockShareholding", 14),
+    timed("mis:otcIndex", async () => { const r = await fetchOtcIndexRt(); return { date: r.date, index: r.index }; })
+  ];
 
-  const [a, b] = await Promise.all([Promise.all(twse), Promise.all(tpex)]);
-  const twseOk = a.every((s) => s.ok), tpexOk = b.every((s) => s.ok);
-  return { ok: twseOk && tpexOk, twseOk, tpexOk, code, otcCode, checkedAt: new Date().toISOString(), sources: a.concat(b) };
+  const [a, b, c] = await Promise.all([Promise.all(twse), Promise.all(tpex), Promise.all(fm)]);
+  const twseOk = a.every((s) => s.ok);
+  // 上櫃只要「櫃買中心」或「FinMind 備援」其中一組全部正常就算 OK；tpexVia 說明目前實際走哪一組
+  const officialOk = b.every((s) => s.ok), fmOk = c.every((s) => s.ok);
+  const tpexOk = officialOk || fmOk;
+  const tpexVia = officialOk ? "official" : (fmOk ? "finmind" : null);
+  return { ok: twseOk && tpexOk, twseOk, tpexOk, tpexVia, finmindToken: !!FINMIND_TOKEN, code, otcCode,
+    checkedAt: new Date().toISOString(), sources: a.concat(b, c) };
 }
 
 // /api/debug?ds=t86&code=2330 → 看欄位名稱與該代號那一列原始資料（欄位改版時用）
@@ -1195,14 +1419,29 @@ async function sourceSample(ds, code) {
   if (ds === "stockDay") return { ds, history: await fetchHistory(code) };
   if (ds === "tpexDay") return { ds, history: await fetchTpexHistory(code) };
   if (ds === "realtime") return { ds, realtime: await fetchRealtime(code) };
+  // FinMind 原始資料：fm_TaiwanStockPER 這類；fmSnapshot／fmExtra 看解析後的結果
+  if (ds.indexOf("fm_") === 0) {
+    const name = ds.slice(3);
+    if (!/^[A-Za-z]+$/.test(name)) return { ds, error: "資料集名稱只能是英文字母" };
+    const d = name === "TaiwanStockInfo" ? await fmFetch(name, { data_id: code }, 60) : await fmStock(name, code, 60, 60);
+    return { ds, rows: d.length, keys: d[0] ? Object.keys(d[0]) : [], last: d.slice(-6) };
+  }
+  if (ds === "fmSnapshot") {
+    const [history, valuation, institutional] = await Promise.all([
+      fmHistory(code).catch((e) => ({ error: e.message })), fmValuation(code).catch((e) => ({ error: e.message })),
+      fmInstitutional(code).catch((e) => ({ error: e.message }))]);
+    return { ds, valuation, institutional, history };
+  }
+  if (ds === "fmExtra") return { ds, extra: await fmExtra(code), otcIndex: await fetchOtcIndexRt().catch((e) => ({ error: e.message })) };
   return { error: "ds 可用值：" + Object.keys(OPENAPI).concat(Object.keys(TPEX_OPENAPI).map((k) => "tp_" + k),
-    ["t86", "qfiis", "tpexPe", "tpexInst", "stockDay", "tpexDay", "realtime"]).join("|") };
+    ["t86", "qfiis", "tpexPe", "tpexInst", "stockDay", "tpexDay", "realtime", "fm_<FinMind 資料集>", "fmSnapshot", "fmExtra"]).join("|") };
 }
 
 // ---- 路由 ----
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders() });
+    FINMIND_TOKEN = (env && env.FINMIND_TOKEN) || "";
 
     const url = new URL(request.url);
     try {
@@ -1235,7 +1474,7 @@ export default {
         if (!/^\d{4,6}[A-Z]?$/.test(dcode) || !/^\d{4,6}[A-Z]?$/.test(ocode)) return json({ error: "請提供有效的股票代號（例如 2330）" }, 400);
         if (!ds) return json(await sourceStatus(dcode, ocode));
         // 上櫃樣本（tp_*、tpexInst、tpexDay）沒指定 code 時改用 otc 代號
-        const tpexDs = ds.indexOf("tp_") === 0 || ds.indexOf("tpex") === 0;
+        const tpexDs = ds.indexOf("tp_") === 0 || ds.indexOf("tpex") === 0 || ds.indexOf("fm") === 0;
         return json(await sourceSample(ds, tpexDs && !url.searchParams.get("code") ? ocode : dcode));
       }
 
