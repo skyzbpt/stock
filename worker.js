@@ -166,16 +166,18 @@ const OPENAPI = {
 function oa(key, ttl) { return twFetch("https://openapi.twse.com.tw/v1/" + OPENAPI[key], ttl); }
 
 // 櫃買中心 OpenAPI 資料集（https://www.tpex.org.tw/openapi/ 有完整清單）
-// mopsfe_* 與證交所 t187ap* 同樣來自公開資訊觀測站，欄位名稱相同，解析程式共用
+// mopsfin_t187ap*_O 是證交所 t187ap*_L 的上櫃版（同樣來自公開資訊觀測站）。03／04／05 的名稱有多個開源專案佐證，
+// 14／45 依同一命名規則。上櫃版多半是英文欄位（已知：SecuritiesCompanyCode、SecuritiesIndustryCode），
+// 其餘欄位名稱未經實測，解析時中英文都試；對不上就顯示「—」，部署後用 /api/debug?ds=tp_rev&otc=6488 看實際欄位
 const TPEX_OPENAPI = {
-  pe:    "tpex_mainboard_peratio_analysis",  // 本益比、殖利率、股價淨值比
+  pe:    "tpex_mainboard_peratio_analysis",  // 本益比、殖利率、股價淨值比（有專案回報已下架，抓不到改走網站端點）
   margn: "tpex_mainboard_margin_balance",    // 融資融券餘額
   index: "tpex_index",                       // 櫃買指數
-  basic: "mopsfe_t187ap03_O",                // 上櫃公司基本資料
-  rev:   "mopsfe_t187ap05_O",                // 每月營業收入彙總表
-  fin:   "mopsfe_t187ap14_O",                // 各產業 EPS 統計資訊（季）
-  div:   "mopsfe_t187ap45_O",                // 股利分派情形
-  news:  "mopsfe_t187ap04_O"                 // 每日重大訊息
+  basic: "mopsfin_t187ap03_O",               // 上櫃公司基本資料
+  rev:   "mopsfin_t187ap05_O",               // 每月營業收入彙總表
+  fin:   "mopsfin_t187ap14_O",               // 各產業 EPS 統計資訊（季）
+  div:   "mopsfin_t187ap45_O",               // 股利分派情形
+  news:  "mopsfin_t187ap04_O"                // 每日重大訊息
 };
 function tpOa(key, ttl) { return twFetch("https://" + TPEX_HOST + "/openapi/v1/" + TPEX_OPENAPI[key], ttl); }
 
@@ -309,6 +311,34 @@ function fetchTpexInst() {
       byCode[code] = { foreignLots: lots(foreign), trustLots: lots(trust), dealerLots: lots(dealer), totalLots: lots(total) };
     }
     return { date: r.date, byCode };
+  });
+}
+
+// ---- 上櫃本益比／殖利率／股價淨值比 ----
+// 先用 OpenAPI；有開源專案回報這個資料集已下架，抓不到就改走網站端點 afterTrading/peQryDate
+// （欄位順序參考 fugle/node-twstock：代號、名稱、本益比、每股股利、股利年度、殖利率、股價淨值比）
+function fetchTpexPe() {
+  return memo("TPEX_PE", 600, async () => {
+    const rows = await tpOa("pe", 600).catch(() => null);
+    const byCode = {};
+    if (Array.isArray(rows) && rows.length) {
+      for (const r of rows) {
+        const code = codeOf(r);
+        if (code) byCode[code] = { name: String(pick(r, ["CompanyName", "公司名稱"]) || "").trim() || null,
+          pe: num(pick(r, ["PriceEarningRatio", "本益比"])), dividendYield: num(pick(r, ["YieldRatio", "殖利率"])),
+          pb: num(pick(r, ["PriceBookRatio", "淨值比"])) };
+      }
+      return { source: "openapi", byCode };
+    }
+    const w = await tpexLatest("afterTrading/peQryDate", {});
+    if (!w) return null;
+    const at = (test, dflt) => { const i = colIdx(w.fields, test); return i < 0 ? dflt : i; };
+    const iPe = at(has("本益比"), 2), iY = at(has("殖利率"), 5), iPb = at(has("淨值比"), 6);
+    for (const row of w.data) {
+      const code = String(row[0] || "").trim();
+      if (code) byCode[code] = { name: String(row[1] || "").trim() || null, pe: num(row[iPe]), dividendYield: num(row[iY]), pb: num(row[iPb]) };
+    }
+    return { source: "www", date: w.date, byCode };
   });
 }
 
@@ -582,7 +612,7 @@ async function buildTwseSnapshot(code, dayAll, rtP, bwP, t86P, histOnce) {
 // confirmed＝即時行情已確認是上櫃；false 代表只是「不在上市清單」推定的
 async function buildOtcSnapshot(code, rt, confirmed) {
   const [pe, inst, th] = await Promise.all([
-    tpOa("pe", 600).catch(() => null),
+    fetchTpexPe().catch(() => null),
     fetchTpexInst().catch(() => null),
     fetchTpexHistory(code).catch(() => null)
   ]);
@@ -610,16 +640,10 @@ async function buildOtcSnapshot(code, rt, confirmed) {
   if (!snap.price) snap.notes.push("查無此代號的上市／上櫃行情（可能為興櫃、代號有誤，或櫃買中心暫時無法連線）。");
 
   // 估值（本益比／殖利率／股價淨值比）
-  if (Array.isArray(pe)) {
-    const row = pe.find((r) => codeOf(r) === code);
-    if (row) {
-      snap.name = snap.name || String(pick(row, ["CompanyName", "公司名稱"]) || "").trim() || null;
-      snap.valuation = {
-        pe: num(pick(row, ["PriceEarningRatio", "本益比"])),
-        dividendYield: num(pick(row, ["YieldRatio", "殖利率"])),
-        pb: num(pick(row, ["PriceBookRatio", "淨值比"]))
-      };
-    }
+  const v = pe && pe.byCode[code];
+  if (v) {
+    snap.name = snap.name || v.name;
+    snap.valuation = { pe: v.pe, dividendYield: v.dividendYield, pb: v.pb };
   }
 
   // 三大法人買賣超（張；外資含外資自營商）
@@ -690,7 +714,7 @@ async function buildExtra(code, mkP) {
       const shares = num(pick(r, ["已發行普通股數"]));
       const capital = num(pick(r, ["實收資本額"]));
       out.profile = {
-        industry: INDUSTRY[String(pick(r, ["產業別"]) || "").trim()] || null,
+        industry: INDUSTRY[String(pick(r, ["產業別", "SecuritiesIndustryCode"]) || "").trim()] || null,
         sharesB: shares != null ? +(shares / 1e8).toFixed(2) : (capital != null ? +(capital / 10 / 1e8).toFixed(2) : null),
         capitalB: capital != null ? +(capital / 1e8).toFixed(1) : null,
         unit: "sharesB=億股, capitalB=億元"
@@ -787,8 +811,8 @@ async function buildExtra(code, mkP) {
     const rows = news.filter((x) => codeOf(x) === code);
     if (rows.length) {
       out.announcements = rows.slice(-3).reverse().map((r) => ({
-        date: anyDateToISO(pick(r, ["發言日期"])),
-        subject: String(pick(r, ["主旨"]) || "").trim().slice(0, 80)
+        date: anyDateToISO(pick(r, ["發言日期", "Date"])),
+        subject: String(pick(r, ["主旨", "Subject"]) || "").trim().slice(0, 80)
       }));
     }
   }
@@ -1127,7 +1151,12 @@ async function sourceStatus(code, otcCode) {
   }));
   twse.push(rtCheck(code));
   // 上櫃（櫃買中心）
-  const tpex = openapiCheck("tpex:openapi:", Object.keys(TPEX_OPENAPI), tpOa);
+  const tpex = openapiCheck("tpex:openapi:", Object.keys(TPEX_OPENAPI).filter((k) => k !== "pe"), tpOa);
+  tpex.push(timed("tpex:pe", async () => {
+    const r = await fetchTpexPe();
+    if (!r) return { ok: false, error: "OpenAPI 與網站端點都抓不到" };
+    return { source: r.source, rows: Object.keys(r.byCode).length, date: r.date || null, hasCode: !!r.byCode[otcCode] };
+  }));
   tpex.push(instCheck("tpex:www:inst", fetchTpexInst, otcCode));
   tpex.push(timed("tpex:www:tradingStock(" + otcCode + ")", async () => {
     const h = (await fetchTpexHistory(otcCode)).rows;
@@ -1153,6 +1182,10 @@ async function sourceSample(ds, code) {
     return { ds, date: r.date, rows: r.data.length, fields: r.fields,
       sample: r.data.find((row) => String(row[0] || "").trim() === code) || null, parsed: (await RWD_SOURCES[ds]() || { byCode: {} }).byCode[code] || null };
   }
+  if (ds === "tpexPe") {
+    const r = await fetchTpexPe();
+    return r ? { ds, source: r.source, date: r.date || null, rows: Object.keys(r.byCode).length, parsed: r.byCode[code] || null } : { ds, error: NO_DATA };
+  }
   if (ds === "tpexInst") {
     const r = await tpexLatest("insti/dailyTrade", { type: "Daily", sect: "EW" });
     if (!r) return { ds, error: NO_DATA };
@@ -1163,7 +1196,7 @@ async function sourceSample(ds, code) {
   if (ds === "tpexDay") return { ds, history: await fetchTpexHistory(code) };
   if (ds === "realtime") return { ds, realtime: await fetchRealtime(code) };
   return { error: "ds 可用值：" + Object.keys(OPENAPI).concat(Object.keys(TPEX_OPENAPI).map((k) => "tp_" + k),
-    ["t86", "qfiis", "tpexInst", "stockDay", "tpexDay", "realtime"]).join("|") };
+    ["t86", "qfiis", "tpexPe", "tpexInst", "stockDay", "tpexDay", "realtime"]).join("|") };
 }
 
 // ---- 路由 ----
