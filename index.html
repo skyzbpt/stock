@@ -205,7 +205,8 @@
   .sig.bull{color:#BE123C;background:#FFF1F3;border-color:#FECDD6;}
   .sig.bear{color:#047857;background:#ECFDF5;border-color:#A7F3D0;}
   .tc-grid{grid-template-columns:repeat(4,1fr);}
-  .sum-grid{grid-template-columns:repeat(4,1fr);margin-top:0;}
+  .sum-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:0;}
+  .sum-grid .v{overflow-wrap:anywhere;}   /* 金額很大時換行，不要把格子撐出卡片 */
   .tc-grid .s{line-height:1.55;}
   .tc-disc{font-size:12px;color:var(--faint);margin-top:10px;}
 
@@ -228,7 +229,7 @@
   .pq-row.hit:hover{background:#FFEDD5;}
   .pq-sub{display:block;font-size:11.5px;font-weight:500;color:var(--muted);white-space:normal;line-height:1.45;}
   .pq-sub.hit{color:#C2410C;font-weight:600;}
-  .rank-px .pre{font-size:11px;color:var(--faint);font-weight:500;margin-right:3px;}
+  .rank-px .pre,.pt .pre{font-size:11px;color:var(--faint);font-weight:500;margin-right:3px;}
   .icon-btn.bell-on{color:#C2410C;border-color:#FDBA74;background:#FFF7ED;}
   .pq-edit{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 13px;background:var(--mist);border-bottom:1px solid var(--line-soft);}
   .pq-edit:last-child{border-bottom:none;}
@@ -346,7 +347,7 @@
   .foot a:hover{text-decoration:underline;}
 
   @media (max-width:720px){
-    .tc-grid,.sum-grid{grid-template-columns:repeat(2,1fr);}
+    .tc-grid,.sum-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
   }
   @media (max-width:560px){
     .app{padding:22px 15px 64px;}
@@ -501,7 +502,7 @@
           <button class="btn-sm primary" id="hAdd">加入／更新</button>
         </div>
         <div class="cmd-hint" id="hMsg">同一檔再加入一次，會用新的股數與成本覆蓋原本的紀錄。</div>
-        <div class="port-note">怎麼算：市值＝現價×股數；未實現損益＝市值－買進成本－預估賣出費用。賣出費用以手續費 0.1425%（最低 20 元，未計券商折扣）加證交稅估算，一般股票 0.3%、代號 00 開頭的 ETF 0.1%。買進手續費請自行併入每股成本；尚未開盤時以昨收價估算。數字僅供參考，實際以券商對帳單為準。</div>
+        <div class="port-note">怎麼算：市值＝現價×股數；未實現損益＝市值－買進成本－預估賣出費用。賣出費用以手續費 0.1425%（最低 20 元，未計券商折扣）加證交稅估算，一般股票 0.3%、代號 00 開頭的 ETF 0.1%，債券 ETF（代號結尾是 B，例如 00679B）目前免證交稅。買進手續費請自行併入每股成本；還沒有成交價時以昨收價估算。數字僅供參考，實際以券商對帳單為準。</div>
       </div>
     </div>
   </section>
@@ -595,7 +596,7 @@
   var watchRow=$("watchRow"), watchChips=$("watchChips");
 
   var state = { scen:"overview", code:null, name:"", snapshot:null, extra:null, text:"", lastTry:null };
-  var busy = false, anTimer=null;
+  var busy = false, anTimer=null, queued=null;   // queued：忙碌時點了別檔，等手上的工作結束再自動切換
 
   // ---------- Worker 網址 ----------
   function getBase(){ return (urlInput.value.trim() || lsGet("skyline_worker") || DEFAULT_WORKER || "").replace(/\/+$/,""); }
@@ -630,7 +631,9 @@
   $("testWorker").addEventListener("click", testConn);
 
   // ---------- 最近查過 ----------
-  function loadRecent(){ try{ return JSON.parse(lsGet("skyline_recent")||"[]"); }catch(e){ return []; } }
+  // 只收合法的項目：localStorage 被改壞（不是陣列、少了代號）時當作空清單，不讓整頁壞掉
+  function validChips(v){ return Array.isArray(v) ? v.filter(function(x){ return x && typeof x.c==="string" && x.c; }) : []; }
+  function loadRecent(){ try{ return validChips(JSON.parse(lsGet("skyline_recent")||"[]")); }catch(e){ return []; } }
   function saveRecent(code, name){
     var list = loadRecent().filter(function(x){ return x.c !== code; });
     list.unshift({ c:code, n:(name||"").slice(0,10) });
@@ -643,7 +646,7 @@
     var html = "";
     for(var i=0;i<list.length;i++){
       var it = list[i];
-      html += '<button class="chip-eg" data-code="'+it.c+'">'+(it.n? esc(it.n)+" " : "")+it.c+'</button>';
+      html += '<button class="chip-eg" data-code="'+escAttr(it.c)+'">'+(it.n? esc(it.n)+" " : "")+esc(it.c)+'</button>';
     }
     recentChips.innerHTML = html;
     recentRow.style.display = "flex";
@@ -651,7 +654,7 @@
 
   // ---------- 自選股 ----------
   var watchEdit = false;
-  function loadWatch(){ try{ return JSON.parse(lsGet("skyline_watch")||"[]"); }catch(e){ return []; } }
+  function loadWatch(){ try{ return validChips(JSON.parse(lsGet("skyline_watch")||"[]")); }catch(e){ return []; } }
   function saveWatchList(list){
     lsSet("skyline_watch", JSON.stringify(list.slice(0,20)));
     renderWatch();
@@ -673,10 +676,10 @@
     var list = loadWatch();
     var html="";
     for(var i=0;i<list.length;i++){
-      var it=list[i], label=(it.n? esc(it.n)+" " : "")+it.c;
+      var it=list[i], label=(it.n? esc(it.n)+" " : "")+esc(it.c);
       html += watchEdit
-        ? '<button class="chip-eg chip-del" data-code="'+it.c+'" title="點擊刪除">✕ '+label+'</button>'
-        : '<button class="chip-eg" data-code="'+it.c+'">★ '+label+'</button>';
+        ? '<button class="chip-eg chip-del" data-code="'+escAttr(it.c)+'" title="點擊刪除">✕ '+label+'</button>'
+        : '<button class="chip-eg" data-code="'+escAttr(it.c)+'">★ '+label+'</button>';
     }
     if(!list.length){
       html = '<span style="font-size:12.5px;color:var(--faint);">'
@@ -754,7 +757,7 @@
   // ---------- 技術分析：K 線＋均線＋成交量（純 SVG，不靠外部套件）----------
   // 圖寬用 viewBox 拉伸（preserveAspectRatio="none"），高度固定 250px，所以 y 座標＝實際像素；
   // 線條加 non-scaling-stroke 才不會被橫向拉粗，文字標籤用 HTML 疊在上面才不會變形
-  var TECH_BARS = { "1m":22, "3m":66 };   // 約 1 個月／3 個月的交易日
+  var TECH_BARS = { "1m":22, "3m":0 };   // 1 個月約 22 個交易日；3 個月＝後端給的全部日 K（0 代表全部）
   var MA_LINES = [[5,"#F59E0B","MA5"],[20,"#0284C7","MA20"],[60,"#8B5CF6","MA60"]];
   var tech = { hist:[], ma:{}, view:null, range:(lsGet("skyline_tech_range")==="1m" ? "1m" : "3m") };
 
@@ -779,7 +782,8 @@
       + '</div>';
   }
 
-  function techTiles(t, close){
+  // partial：最後一根是盤中資料（成交量還在累積）
+  function techTiles(t, close, partial){
     var ma=t.ma||{}, kd=t.kd, mc=t.macd, rsi=t.rsi14;
     function tile(k, v, s){ return '<div class="cell"><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>'; }
     function maS(v, ex){
@@ -796,7 +800,8 @@
       + tile("MACD", mc ? "DIF "+fmt(mc.dif,2) : "—",
              mc ? '柱狀 OSC <span class="'+cls(mc.hist)+'">'+sign(mc.hist)+fmt(mc.hist,2)+'</span>；由負轉正偏多、由正轉負偏空'
                 : "比較快慢均線的差距看趨勢（約需 35 個交易日）")
-      + tile("量比", t.volRatio==null ? "—" : fmt(t.volRatio,2)+" 倍", "今天成交量是前 5 日平均的幾倍，大於 1 代表比平常熱絡")
+      + tile("量比", t.volRatio==null ? "—" : fmt(t.volRatio,2)+" 倍",
+             "今天成交量是前 5 日平均的幾倍，大於 1 代表比平常熱絡"+(partial ? "；盤中量還在累積，收盤前會偏低" : ""))
       + tile("20 日高低", (t.high20==null || t.low20==null) ? "—" : "高 "+fmt(t.high20,2)+"<br>低 "+fmt(t.low20,2),
              "近 20 日的最高與最低價，常被當成短線的壓力與支撐")
       + '</div>';
@@ -815,7 +820,8 @@
     var ranges = "";
     for(var k in TECH_BARS) ranges += '<button class="an-tab'+(k===tech.range?" active":"")+'" data-range="'+k+'">'+(k==="1m"?"1 個月":"3 個月")+'</button>';
     // 舊版後端沒有 technical：只畫 K 線圖，不顯示指標
-    var body = t ? techSignals(t) + techTiles(t, closes[closes.length-1])
+    var partial = t ? (t.volPartial!=null ? !!t.volPartial : !!hist[hist.length-1].live) : false;
+    var body = t ? techSignals(t) + techTiles(t, closes[closes.length-1], partial)
                  : (hist.length<20 ? '<div class="note">交易天數不足 20 天，暫時不計算技術指標。</div>' : "");
     var basis = (t && t.asOf) ? "指標依 "+esc(mmdd(t.asOf))+" 前 "+fmt(t.bars)+" 個交易日計算。" : "";
 
@@ -839,8 +845,9 @@
       drawTechChart();
     });
     var ch = $("tcChart");
+    // 輕點用 pointerdown：它帶的是手指實際位置（click 在觸控螢幕會被瀏覽器校正座標，可能選到隔壁那天）
     ch.addEventListener("pointermove", techPointer);
-    ch.addEventListener("click", techPointer);
+    ch.addEventListener("pointerdown", techPointer);
     ch.addEventListener("pointerleave", function(e){ if(e.pointerType==="mouse") techPick(-1); });
   }
 
@@ -1092,7 +1099,7 @@
     }
     if(s.technical){
       var t = s.technical;
-      c.technical = { asOf:t.asOf, ma:t.ma, rsi14:t.rsi14, kd:t.kd, macd:t.macd, volRatio:t.volRatio,
+      c.technical = { asOf:t.asOf, ma:t.ma, rsi14:t.rsi14, kd:t.kd, macd:t.macd, volRatio:t.volRatio, volPartial:!!t.volPartial,
                       signals:(t.signals||[]).map(function(x){ return x.label; }) };
     }
     if(state.extra){
@@ -1149,7 +1156,7 @@
       stopAnLoading();
       anArea.innerHTML='<div class="an-loading">分析失敗：'+esc(err.message)+'　可切換角度或重按分析再試。</div>';
     })
-    .then(function(){ busy=false; goEl.disabled=false; anTabs.classList.remove("lock"); });
+    .then(function(){ busy=false; goEl.disabled=false; anTabs.classList.remove("lock"); runQueued(); });
   }
 
   // ---------- 完整流程：秒讀（行情＋基本面並行）→ 分析 ----------
@@ -1199,12 +1206,30 @@
         busy=false; goEl.disabled=false;
         statCard.innerHTML=""; techCard.innerHTML=""; extraCard.innerHTML=""; resultEl.classList.remove("show");
         showErr(err.message+"　（請確認 Worker 已部署、網址正確；可開啟 Worker 網址加上 /api/debug 檢查證交所／櫃買中心資料源）");
+        runQueued();
       });
+  }
+
+  // 從市場雷達、自選持股點某一檔：手上還有分析在跑時先排隊，跑完自動切換（不然點了會沒反應）
+  var HINT_TXT = hintEl.textContent;
+  function openWhenFree(code){
+    if(!busy){ queued=null; runFull(code); return; }
+    if(code===state.lastTry){ queued=null; hintEl.classList.remove("show"); return; }   // 正在跑的就是這一檔
+    queued = code;
+    hintEl.textContent = "目前還有一項分析在進行，完成後會自動切換到 "+code+"。";
+    hintEl.classList.add("show");
+  }
+  function runQueued(){
+    if(busy || !queued) return;
+    var c=queued; queued=null;
+    hintEl.classList.remove("show"); hintEl.textContent=HINT_TXT;
+    qEl.value=c;
+    runFull(c, mode!=="stock");
   }
 
   function run(){
     var q=qEl.value.trim().toUpperCase();
-    if(!/^\d{4,6}[A-Z]?$/.test(q)){ hintEl.classList.add("show"); qEl.focus(); return; }
+    if(!/^\d{4,6}[A-Z]?$/.test(q)){ hintEl.textContent=HINT_TXT; hintEl.classList.add("show"); qEl.focus(); return; }
     hintEl.classList.remove("show");
     runFull(q);
   }
@@ -1309,7 +1334,7 @@
         $("radarArea").innerHTML="";
         showErr("市場掃描失敗："+err.message+"　（若剛更新過 worker.js，請確認新版已重新部署）");
       })
-      .then(function(){ busy=false; $("scanBtn").disabled=false; });
+      .then(function(){ busy=false; $("scanBtn").disabled=false; runQueued(); });
   }
 
   function renderRadar(){
@@ -1344,7 +1369,7 @@
     $("rankList").onclick = function(e){
       var r = e.target.closest(".rank-row"); if(!r) return;
       var code = r.getAttribute("data-code"); if(!code) return;
-      setMode("stock"); qEl.value = code; runFull(code);
+      openStock(code);
     };
     $("radarAiBtn").addEventListener("click", radarAnalyze);
   }
@@ -1404,7 +1429,7 @@
       wrap.scrollIntoView({ behavior:"smooth", block:"start" });
     })
     .catch(function(err){ $("radarAn").innerHTML = '<div class="an-loading">解讀失敗：'+esc(err.message)+'</div>'; })
-    .then(function(){ busy = false; });
+    .then(function(){ busy = false; runQueued(); });
   }
 
   $("scanBtn").addEventListener("click", scanMarket);
@@ -1444,7 +1469,7 @@
       if(newsTimer){ clearInterval(newsTimer); newsTimer=null; }
       $("newsArea").innerHTML = '<div class="an-loading">新聞查詢失敗：'+esc(err.message)+'　（若剛更新過 worker.js，請確認新版已重新部署）</div>';
     })
-    .then(function(){ busy = false; });
+    .then(function(){ busy = false; runQueued(); });
   }
   $("watchNewsBtn").addEventListener("click", fetchNews);
   $("newsRefreshBtn").addEventListener("click", fetchNews);
@@ -1745,7 +1770,8 @@
   // ---------- 自選持股：即時行情、價格警示、持股損益（/api/quotes；設定都存在這台裝置）----------
   var HOLD_MAX = 50, QUOTE_CHUNK = 30;   // 後端每次最多 30 檔，超過就分批
   var BELL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
-  var port = { quotes:{}, missing:{}, asOf:null, at:0, loading:false, again:false, err:"", timer:null, edit:null, hits:[] };
+  // unavail：這次連線失敗、暫時拿不到報價的代號；notifyBroken：瀏覽器有通知功能卻不能直接建立（例如 Android Chrome）
+  var port = { quotes:{}, missing:{}, unavail:{}, asOf:null, at:0, loading:false, again:false, err:"", timer:null, edit:null, hits:[], notifyBroken:false };
 
   function loadAlerts(){ var v=loadJSON("skyline_alerts", {}); return (v && typeof v==="object" && !Array.isArray(v)) ? v : {}; }
   function saveAlerts(a){ lsSet("skyline_alerts", JSON.stringify(a)); }
@@ -1756,6 +1782,23 @@
   function isTradingTime(){
     var t=new Date(Date.now()+8*3600*1000), d=t.getUTCDay(), m=t.getUTCHours()*60+t.getUTCMinutes();
     return d>=1 && d<=5 && m>=540 && m<=815;
+  }
+  // 有昨收、沒有成交價：開盤前是「尚未開盤」，開盤後是這檔還沒有人成交
+  function noTradeTxt(){
+    var t=new Date(Date.now()+8*3600*1000), d=t.getUTCDay();
+    return (d>=1 && d<=5 && t.getUTCHours()<9) ? "尚未開盤" : "尚無成交";
+  }
+  // 沒有報價時要顯示的文字
+  function noQuoteTxt(c){
+    if(port.missing[c]) return "查無報價";
+    if(port.loading || (!port.at && !port.err)) return "讀取中…";
+    return (port.unavail[c] || port.err) ? "暫時無法取得" : "—";
+  }
+  // 報價所屬的交易日（取最新的一筆）；不是今天代表休市或還沒開盤，顯示的是最近一個交易日的收盤
+  function quoteDate(){
+    var d="";
+    for(var k in port.quotes){ var x=port.quotes[k] && port.quotes[k].date; if(x && x>d) d=x; }
+    return d;
   }
   function portAutoOn(){ return lsGet("skyline_port_auto")==="1"; }
   // 數字欄位：允許千分位逗號；空白回傳 null，格式錯回傳 NaN
@@ -1783,22 +1826,31 @@
     port.loading=true; renderPortStatus();
     var chunks=[];
     for(var i=0;i<codes.length;i+=QUOTE_CHUNK) chunks.push(codes.slice(i,i+QUOTE_CHUNK));
-    Promise.all(chunks.map(function(ch){ return getJSON(base+"/api/quotes?codes="+ch.join(",")); }))
+    // 單批失敗不拖累其他批：那幾檔當作暫時拿不到，全部失敗才顯示錯誤
+    Promise.all(chunks.map(function(ch){
+      return getJSON(base+"/api/quotes?codes="+ch.join(",")).catch(function(err){ return { unavailable:ch, err:err }; });
+    }))
       .then(function(rs){
-        var q={}, miss={};
+        if(rs.every(function(r){ return r.err; })) throw rs[0].err;
+        var q={}, miss={}, un={};
         rs.forEach(function(r){
-          var qs=(r && r.quotes) || {};
+          var qs=r.quotes || {};
           for(var k in qs) if(qs[k]) q[k]=qs[k];
-          (r && r.missing || []).forEach(function(c){ miss[c]=1; });
-          if(r && r.asOf) port.asOf=r.asOf;
+          (r.missing || []).forEach(function(c){ miss[c]=1; });
+          if(r.asOf) port.asOf=r.asOf;
         });
-        port.quotes=q; port.missing=miss; port.at=Date.now(); port.err="";
+        // 暫時拿不到的先沿用上一次的報價（狀態列會提醒）
+        rs.forEach(function(r){
+          (r.unavailable || []).forEach(function(c){ un[c]=1; if(!q[c] && port.quotes[c]) q[c]=port.quotes[c]; });
+        });
+        port.quotes=q; port.missing=miss; port.unavail=un; port.at=Date.now(); port.err=""; port.loading=false;
         fillNames(q);
         renderPort();
         fireAlerts(port.hits);
       })
       .catch(function(err){
         port.err="行情讀取失敗："+err.message+"（若剛更新過 worker.js，請確認新版已重新部署）";
+        port.loading=false;   // 先清掉，列表才不會一直顯示「讀取中…」
         renderPort();
       })
       .then(function(){
@@ -1829,32 +1881,42 @@
     loadWatch().forEach(function(it){
       var a=al[it.c], q=port.quotes[it.c];
       if(!a || !q || q.close==null) return;   // 還沒開盤（沒有成交價）不判斷
-      var nm=(it.n||q.name||it.c)+"（"+it.c+"）";
-      if(a.up!=null && q.close>=a.up) out.push({ code:it.c, dir:"up", text:nm+" 現價 "+fmt(q.close,2)+"，已漲到上限價 "+fmt(a.up,2) });
-      if(a.dn!=null && q.close<=a.dn) out.push({ code:it.c, dir:"dn", text:nm+" 現價 "+fmt(q.close,2)+"，已跌到下限價 "+fmt(a.dn,2) });
+      // approx：這 5 秒內沒成交，現價是最佳買／賣價暫代，提醒文字標「約」
+      var nm=(it.n||q.name||it.c)+"（"+it.c+"）", px=" 現價"+(q.approx ? "約 " : " ")+fmt(q.close,2), day=q.date || twToday();
+      if(a.up!=null && q.close>=a.up) out.push({ code:it.c, dir:"up", day:day, text:nm+px+"，已漲到上限價 "+fmt(a.up,2) });
+      if(a.dn!=null && q.close<=a.dn) out.push({ code:it.c, dir:"dn", day:day, text:nm+px+"，已跌到下限價 "+fmt(a.dn,2) });
     });
     return out;
   }
   function notifySupported(){ return typeof window.Notification!=="undefined"; }
-  function notifyOn(){ return notifySupported() && Notification.permission==="granted" && lsGet("skyline_notify")==="1"; }
-  // 系統通知：同一檔同一方向每天最多一次（iPhone Safari 沒有 Notification，只顯示頁面上的提醒）
+  function notifyOn(){ return notifySupported() && !port.notifyBroken && Notification.permission==="granted" && lsGet("skyline_notify")==="1"; }
+  // 建立系統通知；瀏覽器不允許直接建立（例如 Android Chrome 會丟錯）時回傳 false，並記下來改成只在頁面上提醒
+  function showNotify(title, body, tag){
+    try{ new Notification(title, { body:body, tag:tag }); return true; }
+    catch(e){ port.notifyBroken=true; return false; }
+  }
+  // 系統通知：同一檔同一方向，每個交易日最多一次（以報價日期為準，週末不會因為週五的收盤價再通知）
+  // iPhone Safari 沒有 Notification，只顯示頁面上的提醒
   function fireAlerts(hits){
     if(!hits.length || !notifyOn()) return;
-    var fired=loadJSON("skyline_alert_fired", {}), today=twToday(), k;
+    var fired=loadJSON("skyline_alert_fired", {}), cut=new Date(Date.now()-7*86400000).toISOString().slice(0,10), k;
     if(!fired || typeof fired!=="object") fired={};
-    for(k in fired) if(fired[k]!==today) delete fired[k];   // 舊日期清掉，免得越存越多
-    hits.forEach(function(h){
-      var key=h.code+"_"+h.dir;
-      if(fired[key]===today) return;
-      fired[key]=today;
-      try{ new Notification("台股天際線 · 價格警示", { body:h.text, tag:key }); }catch(e){ /* 部分手機瀏覽器不能直接建立通知 */ }
-    });
+    for(k in fired) if(!(fired[k]>=cut)) delete fired[k];   // 一週前的紀錄清掉，免得越存越多
+    for(var i=0;i<hits.length;i++){
+      var h=hits[i], key=h.code+"_"+h.dir;
+      if(fired[key]===h.day) continue;
+      if(!showNotify("台股天際線 · 價格警示", h.text, key)){ renderNotifyBtn(); break; }   // 沒跳出來就不算通知過
+      fired[key]=h.day;
+    }
     lsSet("skyline_alert_fired", JSON.stringify(fired));
   }
   function renderNotifyBtn(){
     var b=$("portNotify");
     b.classList.remove("on");
-    if(!notifySupported()){ b.textContent="此瀏覽器不支援通知"; b.disabled=true; b.title="觸發的警示仍會顯示在本頁上方"; return; }
+    if(!notifySupported() || port.notifyBroken){
+      b.textContent = notifySupported() ? "此瀏覽器無法直接跳出通知" : "此瀏覽器不支援通知";
+      b.disabled=true; b.title="觸發的警示仍會顯示在本頁上方"; return;
+    }
     if(Notification.permission==="denied"){ b.textContent="通知已被封鎖"; b.disabled=true; b.title="請到瀏覽器的網站設定允許通知"; return; }
     var on=notifyOn();
     b.disabled=false; b.classList.toggle("on", on);
@@ -1864,8 +1926,14 @@
   function toggleNotify(){
     if(!notifySupported()) return;
     if(notifyOn()){ lsSet("skyline_notify","0"); renderNotifyBtn(); return; }
+    var called=false;
     function done(p){
-      if(p==="granted"){ lsSet("skyline_notify","1"); fireAlerts(port.hits); }
+      if(called) return;   // 新版瀏覽器會同時呼叫 callback 又回傳 Promise，只處理一次
+      called=true;
+      // 先跳一則確認通知：建立不了（例如 Android Chrome）就不要顯示成「已開啟」
+      if(p==="granted" && showNotify("台股天際線", "通知已開啟，到價時會在這裡提醒你。", "skyline_on")){
+        lsSet("skyline_notify","1"); fireAlerts(port.hits);
+      }
       renderNotifyBtn();
     }
     if(Notification.permission==="granted"){ done("granted"); return; }
@@ -1878,7 +1946,7 @@
   function alertEditor(c, a){
     a = a || {};
     return '<div class="pq-edit">'
-      + '<label>上限價<input id="alUp" class="cfg-input" type="text" inputmode="decimal" placeholder="漲到多少" autocomplete="off" value="'+(a.up!=null ? escAttr(a.up) : "")+'" /></label>'
+      + '<label>上限價<input id="alUp" data-code="'+escAttr(c)+'" class="cfg-input" type="text" inputmode="decimal" placeholder="漲到多少" autocomplete="off" value="'+(a.up!=null ? escAttr(a.up) : "")+'" /></label>'
       + '<label>下限價<input id="alDn" class="cfg-input" type="text" inputmode="decimal" placeholder="跌到多少" autocomplete="off" value="'+(a.dn!=null ? escAttr(a.dn) : "")+'" /></label>'
       + '<div class="pq-btns"><button class="btn-sm primary" data-act="al-save">儲存</button>'
       + (a.up!=null || a.dn!=null ? '<button class="btn-sm ghost" data-act="al-clear">清除警示</button>' : '')
@@ -1905,14 +1973,16 @@
   }
 
   // ----- 持股損益 -----
-  // 預估賣出費用：手續費 0.1425%（最低 20 元）＋證交稅（股票 0.3%、00 開頭 ETF 0.1%），不含券商折扣
+  // 預估賣出費用：手續費 0.1425%（最低 20 元）＋證交稅（股票 0.3%、00 開頭 ETF 0.1%、債券 ETF 目前停徵），不含券商折扣
+  function taxPermille(code){ return /^00\d{3,4}B$/.test(code) ? 0 : (/^00/.test(code) ? 1 : 3); }   // 千分之幾
   function holdCalc(h, q){
     if(!q) return null;
     var px = q.close!=null ? q.close : q.prevClose;
     if(px==null) return null;
-    var mv=px*h.shares, cost=h.cost*h.shares;
-    var fee=Math.max(20, Math.round(mv*0.001425));
-    var tax=Math.round(mv*(/^00/.test(h.code) ? 0.001 : 0.003));
+    // 市值先換成「分」的整數再算費用，避免小數誤差（例如 38.05×50000）讓四捨五入差 1 元
+    var cents=Math.round(px*100)*h.shares, mv=cents/100, cost=h.cost*h.shares;
+    var fee=Math.max(20, Math.round(cents*1425/1e8));
+    var tax=Math.round(cents*taxPermille(h.code)/1e5);
     var pnl=mv-cost-fee-tax;
     return { px:px, est:q.close==null, mv:mv, cost:cost, fee:fee, tax:tax, pnl:pnl, ret:cost ? pnl/cost : null,
              today:(q.close!=null && q.change!=null) ? q.change*h.shares : null };
@@ -1927,19 +1997,21 @@
       return;
     }
     var T={ mv:0, cost:0, pnl:0, today:0, n:0, miss:0 }, rows="";
+    // 報價不是今天的（週末、假日或盤前）：「今日損益」其實是最近一個交易日的漲跌
+    var qd=quoteDate(), dayLbl=(qd && qd!==twToday()) ? mmdd(qd)+" 損益" : "今日損益";
     list.forEach(function(h){
       var q=port.quotes[h.code], r=holdCalc(h, q), nm=h.name || (q && q.name) || "";
       if(r){ T.mv+=r.mv; T.cost+=r.cost; T.pnl+=r.pnl; if(r.today!=null) T.today+=r.today; T.n++; } else T.miss++;
       var c=escAttr(h.code), cells;
       if(r){
-        var chg = r.est ? "昨收（尚未開盤）"
+        var chg = r.est ? "昨收（"+noTradeTxt()+"）"
           : (q.change==null ? "—" : '<span class="'+cls(q.change)+'">'+signed(q.change,2)+(q.changePct==null ? "" : "（"+signed(q.changePct,2)+"%）")+'</span>');
-        cells = '<td>'+fmt(r.px,2)+'<span class="sub">'+chg+'</span></td>'
+        cells = '<td>'+(q.approx && !r.est ? '<span class="pre">約</span>' : '')+fmt(r.px,2)+'<span class="sub">'+chg+'</span></td>'
           + '<td class="'+cls(r.pnl)+'">'+signed(r.pnl)+'<span class="sub '+cls(r.pnl)+'">'+(r.ret==null ? "—" : signed(r.ret*100,2)+"%")+'</span></td>'
           + '<td class="'+(r.today==null ? "flat" : cls(r.today))+'">'+(r.today==null ? "—" : signed(r.today))+'</td>'
           + '<td>'+fmt(r.mv)+'<span class="sub">賣出費用約 '+fmt(r.fee+r.tax)+'</span></td>';
       } else {
-        cells = '<td colspan="4" class="flat">'+(port.missing[h.code] ? "查無報價" : (port.loading || !port.at ? "讀取中…" : "—"))+'</td>';
+        cells = '<td colspan="4" class="flat">'+noQuoteTxt(h.code)+'</td>';
       }
       rows += '<tr data-code="'+c+'">'
         + '<td><span class="nm">'+esc(nm || h.code)+'</span><span class="sub">'+esc(h.code)+(r && r.est ? " · 以昨收估" : "")+'</span></td>'
@@ -1950,7 +2022,7 @@
         + '</tr>';
     });
     el.innerHTML = '<div class="tbl-scroll"><table class="pt"><thead><tr>'
-      + '<th>股票</th><th>現價</th><th>未實現損益</th><th>今日損益</th><th>市值</th><th>股數</th><th>每股成本</th><th></th>'
+      + '<th>股票</th><th>現價</th><th>未實現損益</th><th>'+dayLbl+'</th><th>市值</th><th>股數</th><th>每股成本</th><th></th>'
       + '</tr></thead><tbody>'+rows+'</tbody></table></div>';
 
     function cell(k, v, s){ return '<div class="cell"><div class="k">'+k+'</div><div class="v">'+v+'</div>'+(s ? '<div class="s">'+s+'</div>' : '')+'</div>'; }
@@ -1959,7 +2031,7 @@
         + cell("總成本", fmt(T.cost))
         + cell("總未實現損益", '<span class="'+cls(T.pnl)+'">'+signed(T.pnl)+'</span>',
                T.cost ? '報酬率 <span class="'+cls(T.pnl)+'">'+signed(T.pnl/T.cost*100,2)+'%</span>' : "")
-        + cell("今日損益", '<span class="'+cls(T.today)+'">'+signed(T.today)+'</span>')
+        + cell(dayLbl, '<span class="'+cls(T.today)+'">'+signed(T.today)+'</span>')
         + '</div>'
         + (T.miss ? '<div class="data-date">有 '+T.miss+' 筆暫時沒有報價，未計入合計。</div>' : "")
       : "";
@@ -1990,10 +2062,13 @@
   function renderPortWatch(){
     var el=$("portWatch"), list=loadWatch(), al=loadAlerts(), hitSet={};
     port.hits.forEach(function(h){ hitSet[h.code]=1; });
-    // 自動更新重畫時，保留正在輸入的警示價位
-    var keep=null, upEl=$("alUp"), dnEl=$("alDn");
-    if(port.edit && upEl && dnEl) keep={ up:upEl.value, dn:dnEl.value, focus:document.activeElement ? document.activeElement.id : "" };
+    // 正在設定警示的股票已在別處移出自選：關掉編輯框（要先判斷，下面才不會去還原已不存在的輸入框）
     if(port.edit && !isWatched(port.edit)) port.edit=null;
+    // 自動更新重畫時，保留正在輸入的警示價位與游標位置（只限同一檔；換開別檔的鈴鐺時不能把上一檔的價位帶過去）
+    var keep=null, upEl=$("alUp"), dnEl=$("alDn"), act=document.activeElement, typing=(act===upEl || act===dnEl);
+    if(port.edit && upEl && dnEl && upEl.getAttribute("data-code")===port.edit)
+      keep={ up:upEl.value, dn:dnEl.value, focus:typing ? act.id : "",
+             ss:typing ? act.selectionStart : null, se:typing ? act.selectionEnd : null };
     if(!list.length){
       el.innerHTML='<div class="port-empty">還沒有自選股：在下方輸入代號加入，或到「個股分析」按星號。</div>';
       return;
@@ -2002,12 +2077,14 @@
     list.forEach(function(it){
       var c=it.c, q=port.quotes[c], a=al[c], hit=!!hitSet[c], nm=it.n || (q && q.name) || c, px;
       if(!q){
-        px='<span class="rank-px flat">'+(port.missing[c] ? "查無報價" : "—")+'</span>';
+        px='<span class="rank-px flat">'+noQuoteTxt(c)+'</span>';
       } else if(q.close==null){
-        px='<span class="rank-px flat"><span class="pre">昨收</span>'+fmt(q.prevClose,2)+'<span class="pc">尚未開盤</span></span>';
+        px='<span class="rank-px flat"><span class="pre">昨收</span>'+fmt(q.prevClose,2)+'<span class="pc">'+noTradeTxt()+'</span></span>';
       } else {
         var cc=cls(q.change==null ? 0 : q.change);
-        px='<span class="rank-px '+cc+'">'+fmt(q.close,2)+'<span class="pc">'
+        // approx：最近 5 秒沒成交，暫以最佳買／賣價顯示
+        px='<span class="rank-px '+cc+'"'+(q.approx ? ' title="最近幾秒沒有成交，暫以最佳買價（或賣價）顯示"' : '')+'>'
+          +(q.approx ? '<span class="pre">約</span>' : '')+fmt(q.close,2)+'<span class="pc">'
           +(q.change==null ? "—" : signed(q.change,2))+(q.changePct==null ? "" : "（"+signed(q.changePct,2)+"%）")+'</span></span>';
       }
       var at=alertTxt(a);
@@ -2020,9 +2097,12 @@
       if(port.edit===c) html += alertEditor(c, a);
     });
     el.innerHTML = html+'</div>';
-    if(keep){
+    if(keep && $("alUp")){
       $("alUp").value=keep.up; $("alDn").value=keep.dn;
-      if(keep.focus==="alUp" || keep.focus==="alDn") $(keep.focus).focus();
+      if(keep.focus){
+        var f=$(keep.focus); f.focus();
+        try{ if(keep.ss!=null) f.setSelectionRange(keep.ss, keep.se); }catch(e){}
+      }
     }
   }
 
@@ -2031,12 +2111,16 @@
     $("portAuto").textContent = "自動更新："+(auto ? "開" : "關");
     $("portAuto").classList.toggle("on", auto);
     $("portRefresh").disabled = port.loading;
+    var nu=Object.keys(port.unavail).length, qd=quoteDate();
     if(port.loading) s="更新中…";
     else if(port.err) s=port.err;
-    else if(port.at) s=hhmm(port.asOf || new Date(port.at).toISOString())+" 更新";
+    else if(port.at){
+      s=hhmm(port.asOf || new Date(port.at).toISOString())+" 更新"+(qd && qd!==twToday() ? "（報價為 "+mmdd(qd)+" 收盤）" : "");
+      if(nu) s+=" · 有 "+nu+" 檔暫時無法取得最新報價，請稍後再按重新整理";
+    }
     if(auto && !port.loading && !port.err) s += (s ? " · " : "")+(isTradingTime() ? "盤中每 60 秒自動更新" : "非交易時間，暫停自動更新");
     st.textContent=s;
-    st.className="port-status"+(port.err && !port.loading ? " warn" : "");
+    st.className="port-status"+((port.err || nu) && !port.loading ? " warn" : "");
   }
 
   function renderPortBanner(){
@@ -2068,7 +2152,9 @@
   }
   function portEnter(){
     renderPort();
-    if(!port.at || Date.now()-port.at>30000) refreshQuotes();
+    // 在別的分頁新加的自選股／持股還沒有報價時，就算剛更新過也要再抓
+    var need=portCodes().some(function(c){ return !port.quotes[c] && !port.missing[c]; });
+    if(need || !port.at || Date.now()-port.at>30000) refreshQuotes();
   }
   document.addEventListener("visibilitychange", function(){
     if(!document.hidden && mode==="port" && portAutoOn() && isTradingTime() && Date.now()-port.at>60000) refreshQuotes();
@@ -2077,7 +2163,7 @@
   function openStock(code){
     setMode("stock");
     qEl.value=code; hintEl.classList.remove("show");
-    runFull(code);
+    openWhenFree(code);
   }
 
   $("portRefresh").addEventListener("click", refreshQuotes);

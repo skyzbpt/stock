@@ -404,13 +404,14 @@ function parseCodes(s) {
     if (!c) continue; // 容許多打的逗號（例如結尾的 ","）
     if (!/^\d{4,6}[A-Z]?$/.test(c)) return { error: "股票代號格式不正確：" + c.slice(0, 12) };
     if (codes.indexOf(c) === -1) codes.push(c);
+    // 超過上限就立刻回錯：超長的網址不用整串比對完（免得白白吃掉 Worker 的 CPU 時間）
+    if (codes.length > QUOTES_MAX) return { error: "一次最多查詢 " + QUOTES_MAX + " 檔股票" };
   }
   if (!codes.length) return { error: "請提供股票代號，用逗號分隔（例如 2330,0050）" };
-  if (codes.length > QUOTES_MAX) return { error: "一次最多查詢 " + QUOTES_MAX + " 檔股票" };
   return { codes };
 }
 
-// 回傳 { asOf, quotes: { 代號: 報價 }, missing: [查無的代號] }；
+// 回傳 { asOf, quotes: { 代號: 報價 }, missing: [查無的代號], unavailable: [這次連線失敗、暫時拿不到的代號] }；
 // 盤前還沒成交、但有昨收的股票照樣回傳（close 為 null），讓網頁顯示「尚未開盤」
 async function fetchQuotes(codes) {
   const want = new Set(codes);
@@ -429,8 +430,10 @@ async function fetchQuotes(codes) {
       return j && Array.isArray(j.msgArray) ? j.msgArray : null;
     } catch (e) { return null; }
   }));
-  // 每一批都失敗才算整體失敗；只有部分失敗時，那幾檔會列在 missing
+  // 每一批都失敗才算整體失敗；只有部分失敗時，那幾檔列在 unavailable（不是查無此股，稍後重試即可）
   if (lists.every((x) => x == null)) throw new Error("即時報價暫時無法取得（證交所即時行情連線失敗），請稍後再試");
+  const unavailable = [];
+  lists.forEach((x, i) => { if (x == null) unavailable.push(...chunks[i]); });
   const quotes = {};
   for (const list of lists) for (const m of list || []) {
     const q = parseMis(m);
@@ -444,18 +447,19 @@ async function fetchQuotes(codes) {
       date: q.date, time: q.time, approx: q.approx
     };
   }
-  return { asOf: new Date().toISOString(), quotes, missing: codes.filter((c) => !quotes[c]) };
+  return { asOf: new Date().toISOString(), quotes, missing: codes.filter((c) => !quotes[c] && unavailable.indexOf(c) === -1), unavailable };
 }
 
 // ---- 個股日成交（給 K 線圖與技術分析用）----
 // 抓最近 4 個月（前 3 個月＋當月），留最後 80 個交易日：60 日均線、MACD 都需要夠長的資料
 const HIST_MONTHS = 4, HIST_ROWS = 80;
+const HIST_OLD_TTL = 7 * 86400;
 // 回傳新→舊的月份清單：從當月往回抓，中途被限流而停下時，至少保住最近的資料（不會只剩舊月份、跟今天接不上）
-// 當月還會變動，快取短一點；之前的月份已定案，快取 12 小時
-function recentMonths() {
+// 當月還會變動，快取短一點；之前的月份已定案、不會再變，快取 7 天，減少打到有頻率限制的證交所網站
+function recentMonths(count) {
   const now = twNow(), out = [];
-  for (let i = 0; i < HIST_MONTHS; i++) {
-    out.push({ ymd: ymdOf(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))), ttl: i === 0 ? 1800 : 43200 });
+  for (let i = 0; i < (count || HIST_MONTHS); i++) {
+    out.push({ ymd: ymdOf(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))), ttl: i === 0 ? 1800 : HIST_OLD_TTL });
   }
   return out;
 }
@@ -466,9 +470,10 @@ function joinMonths(chunks) {
   return rows.slice(-HIST_ROWS);
 }
 
-async function fetchHistory(code) {
+// months：抓幾個月（預設 4；/api/debug 只需確認端點正常，抓 2 個月就好，免得子請求超過上限）
+async function fetchHistory(code, months) {
   const chunks = [];
-  for (const m of recentMonths()) {
+  for (const m of recentMonths(months)) {
     let r = null;
     try { r = await twseRwd("afterTrading/STOCK_DAY", { date: m.ymd, stockNo: code }, m.ttl); }
     catch (e) {
@@ -496,10 +501,10 @@ async function fetchHistory(code) {
 // ---- 上櫃個股日成交（櫃買中心網站端點）----
 // 欄位：日期、成交張數（舊資料為成交仟股，兩者都是 1000 股）、成交仟元、開盤、最高、最低、收盤、漲跌、筆數
 // 回傳 { name, rows }；rows 帶開高低收，最新一筆可直接當收盤行情
-async function fetchTpexHistory(code) {
+async function fetchTpexHistory(code, months) {
   const chunks = [];
   let name = null;
-  for (const m of recentMonths()) {
+  for (const m of recentMonths(months)) {
     let r = null;
     try { r = await tpexWww("afterTrading/tradingStock", { code, date: slashDate(m.ymd) }, m.ttl); }
     catch (e) { break; } // 連不上就停，不要再多打
@@ -548,6 +553,7 @@ function applyRealtime(snap, rt, source) {
 }
 // 盤中／今日即時價還沒進日成交檔：補到走勢最後一點，讓 K 線圖與技術面看到今天
 // 現價若是暫代的最佳買賣價，可能略超出當日高低，所以高低點放寬到包含現價，K 棒才不會畫歪
+// live＝盤中（量價還會變）；13:30 收盤後的快照已是當天定案的數字，不算盤中
 function appendLive(hist, rt) {
   if (!hist || !rt || !rt.date || rt.close == null) return;
   const last = hist[hist.length - 1];
@@ -556,7 +562,7 @@ function appendLive(hist, rt) {
       date: rt.date, open: rt.open,
       high: rt.high != null ? Math.max(rt.high, rt.close) : null,
       low: rt.low != null ? Math.min(rt.low, rt.close) : null,
-      close: rt.close, volumeLots: rt.volumeLots, live: true
+      close: rt.close, volumeLots: rt.volumeLots, live: rt.time !== "13:30:00"
     });
   }
 }
@@ -570,7 +576,7 @@ function appendLive(hist, rt) {
 //            K＝2/3×前K＋1/3×RSV、D＝2/3×前D＋1/3×K，從第 9 根開始算、K、D 起始值 50
 //   MACD：DIF＝EMA12−EMA26、DEA＝DIF 的 EMA9、柱狀體 hist＝DIF−DEA（看盤軟體的 OSC）；
 //         EMA 以前 N 筆的簡單平均起算，所以要 26＋9 根才有第一個 DEA，不到 35 根回 null
-//   量比：今日成交張數 ÷ 前 5 日平均張數
+//   量比：今日成交張數 ÷ 前 5 日平均張數；最後一筆是盤中資料時 volPartial＝true（量還在累積，量比會偏低）
 // 缺最高／最低價的日子用收盤價代替
 function computeTechnical(hist) {
   const rows = (Array.isArray(hist) ? hist : []).filter((x) => x && typeof x.close === "number" && isFinite(x.close));
@@ -636,8 +642,11 @@ function computeTechnical(hist) {
   const avg5 = prev5.length === 5 ? prev5.reduce((a, b) => a + b, 0) / 5 : null;
   const volRatio = (typeof vNow === "number" && avg5) ? r2(vNow / avg5) : null;
 
-  // 近 20 日高低點
+  // 近 20 日高低點（含今天）
   const high20 = Math.max(...H.slice(n - 20)), low20 = Math.min(...L.slice(n - 20));
+  // 判斷「創新高／新低」要跟前 19 個交易日（連同今天共 20 日）比：今天的最高價一定 ≥ 收盤，
+  // 若拿含今天的 high20 比，只有剛好收在最高點才會成立
+  const prevHi = Math.max(...H.slice(n - 20, n - 1)), prevLo = Math.min(...L.slice(n - 20, n - 1));
 
   // 訊號（tone：bull 偏多、bear 偏空、neutral 中性）
   const signals = [];
@@ -665,18 +674,16 @@ function computeTechnical(hist) {
   // 盤中的量還在累積，量比一定偏低，所以今天是即時資料時不判斷「量縮」
   if (volRatio != null && volRatio >= 2) signals.push({ key: "vol", label: "爆量（量增 " + (+volRatio.toFixed(1)) + " 倍）", tone: "neutral" });
   else if (volRatio != null && volRatio <= 0.5 && !last.live) signals.push({ key: "vol", label: "量縮", tone: "neutral" });
-  // 20 日內價格完全沒動時，最高＝最低，不算創新高或新低
-  if (high20 > low20) {
-    if (close >= high20) signals.push({ key: "range", label: "創 20 日新高", tone: "bull" });
-    else if (close <= low20) signals.push({ key: "range", label: "創 20 日新低", tone: "bear" });
-  }
+  // 收盤要「超過」前 19 日最高（或跌破最低）才算；只是追平不算
+  if (close > prevHi) signals.push({ key: "range", label: "創 20 日新高", tone: "bull" });
+  else if (close < prevLo) signals.push({ key: "range", label: "創 20 日新低", tone: "bear" });
 
   return {
     asOf: last.date, bars: n,
     ma: { ma5: r2(m5), ma10: r2(sma(10)), ma20: r2(m20), ma60: r2(sma(60)) },
     rsi14: r1(rsi),
     kd: { k: r1(k), d: r1(d) },
-    macd, volRatio,
+    macd, volRatio, volPartial: !!last.live,
     high20: r2(high20), low20: r2(low20),
     signals
   };
@@ -1157,7 +1164,7 @@ function compactSrv(s) {
 }
 // 技術指標精簡版（給 AI 看）：只留數值與訊號文字，K 線明細不送，避免提示太長
 function compactTech(t) {
-  return { asOf: t.asOf, ma: t.ma, rsi14: t.rsi14, kd: t.kd, macd: t.macd, volRatio: t.volRatio,
+  return { asOf: t.asOf, ma: t.ma, rsi14: t.rsi14, kd: t.kd, macd: t.macd, volRatio: t.volRatio, volPartial: !!t.volPartial,
     signals: (t.signals || []).map((x) => x.label) };
 }
 function cmdData(x) {
@@ -1278,6 +1285,7 @@ async function analyze(env, body) {
       "分析角度：" + focus + "\n\n" +
       "以下是剛抓取的證交所／櫃買中心資料（JSON）。price／valuation／institutional／history 為行情、估值、三大法人與走勢；" +
       "technical（若有）為依每日行情算好的技術指標（均線、RSI、KD、MACD、量比與訊號），技術面請直接引用這些數值、不要自行重算；" +
+      "technical.volPartial 為 true 代表今天還在盤中、成交量尚未收齊，量比會偏低，不可解讀為量縮；" +
       "extra（若有）為月營收、最新季 EPS、股利、融資融券、外資持股、重大訊息與大盤：\n```json\n" + JSON.stringify(snapshot, null, 2) + "\n```\n\n" +
       "請根據上面的數據，產出精簡、精準的分析。";
   }
@@ -1356,7 +1364,7 @@ async function sourceStatus(code, otcCode) {
   const twse = openapiCheck("openapi:", Object.keys(OPENAPI), oa);
   for (const k of Object.keys(RWD_SOURCES)) twse.push(instCheck("rwd:" + k, RWD_SOURCES[k], code));
   twse.push(timed("rwd:stockDay(" + code + ")", async () => {
-    const h = await fetchHistory(code);
+    const h = await fetchHistory(code, 2);
     return { ok: h.length > 0, rows: h.length, date: h.length ? h[h.length - 1].date : null };
   }));
   twse.push(rtCheck(code));
@@ -1369,7 +1377,7 @@ async function sourceStatus(code, otcCode) {
   }));
   tpex.push(instCheck("tpex:www:inst", fetchTpexInst, otcCode));
   tpex.push(timed("tpex:www:tradingStock(" + otcCode + ")", async () => {
-    const h = (await fetchTpexHistory(otcCode)).rows;
+    const h = (await fetchTpexHistory(otcCode, 2)).rows;
     return { ok: h.length > 0, rows: h.length, date: h.length ? h[h.length - 1].date : null };
   }));
   tpex.push(rtCheck(otcCode));
