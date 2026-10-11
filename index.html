@@ -150,11 +150,6 @@
   .price-chg{font-family:var(--font-disp);font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;}
   .up{color:var(--up);} .down{color:var(--down);} .flat{color:var(--flat);}
 
-  .spark{margin:14px 0 4px;height:56px;}
-  .spark svg{width:100%;height:100%;display:block;}
-  .spark-meta{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:var(--faint);
-    font-variant-numeric:tabular-nums;margin-bottom:8px;}
-
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:1px;background:var(--line-soft);
     border:1px solid var(--line-soft);border-radius:12px;overflow:hidden;margin-top:8px;}
   .cell{background:var(--white);padding:11px 12px;}
@@ -179,6 +174,86 @@
   .ann li:first-child{border-top:none;padding-top:0;}
   .ann .d{font-family:var(--font-disp);font-size:12px;color:var(--faint);flex:0 0 auto;padding-top:1px;}
   .data-date{font-size:12px;color:var(--faint);margin-top:8px;}
+
+  /* ---------- 技術分析（K 線圖＋指標）---------- */
+  .tech-card{margin-top:14px;}
+  .tc-range{display:flex;gap:6px;}
+  .tc-range .an-tab{font-size:12.5px;padding:4px 11px;}
+  .tc-legend{display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px;font-size:12px;color:var(--muted);margin:2px 0 8px;
+    font-variant-numeric:tabular-nums;}
+  .tc-legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px;}
+  .tc-legend b{font-family:var(--font-disp);font-weight:600;color:var(--ink);}
+  .tc-info{display:flex;flex-wrap:wrap;gap:2px 11px;min-height:32px;align-items:center;font-size:12.5px;color:var(--muted);
+    background:var(--mist);border:1px solid var(--line-soft);border-radius:9px;padding:5px 10px;font-variant-numeric:tabular-nums;}
+  .tc-info b{font-family:var(--font-disp);font-weight:600;color:var(--ink);}
+  .tc-info b.up{color:var(--up);} .tc-info b.down{color:var(--down);}
+  .tc-info .tip{color:var(--faint);font-size:11.5px;}
+  .tc-chart{position:relative;height:250px;margin-top:8px;touch-action:pan-y;cursor:crosshair;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;}
+  .tc-chart svg{position:absolute;inset:0;width:100%;height:100%;display:block;}
+  .tc-lbl{position:absolute;font-family:var(--font-disp);font-size:10.5px;font-weight:600;line-height:14px;color:var(--sky-deep);
+    white-space:nowrap;pointer-events:none;font-variant-numeric:tabular-nums;}
+  .tc-lbl.gl{left:0;color:var(--faint);font-weight:500;background:rgba(255,255,255,.8);border-radius:3px;padding:0 3px;}
+  .tc-lbl.vl{left:0;color:var(--faint);font-weight:500;}
+  .tc-guide{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed var(--sky-deep);pointer-events:none;display:none;}
+  .tc-meta{display:flex;justify-content:space-between;flex-wrap:wrap;gap:2px 10px;font-size:11.5px;color:var(--faint);
+    font-variant-numeric:tabular-nums;margin:6px 0 12px;}
+  .sigs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px;}
+  .sigs .row-k{font-size:12px;color:var(--faint);font-weight:600;margin-right:2px;}
+  .sig{font-size:12.5px;font-weight:600;border-radius:999px;padding:3px 11px;border:1px solid var(--line);
+    background:var(--mist-2);color:var(--sky-deep);}
+  .sig.bull{color:#BE123C;background:#FFF1F3;border-color:#FECDD6;}
+  .sig.bear{color:#047857;background:#ECFDF5;border-color:#A7F3D0;}
+  .tc-grid{grid-template-columns:repeat(4,1fr);}
+  .sum-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:0;}
+  .sum-grid .v{overflow-wrap:anywhere;}   /* 金額很大時換行，不要把格子撐出卡片 */
+  .tc-grid .s{line-height:1.55;}
+  .tc-disc{font-size:12px;color:var(--faint);margin-top:10px;}
+
+  /* ---------- 自選持股（/api/quotes）---------- */
+  .port-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;}
+  .port-status{font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums;}
+  .port-status.warn{color:#C2410C;}
+  .btn-sm.on{background:var(--mist-2);border-color:var(--sky-bright);}
+  .btn-sm:disabled{opacity:.55;cursor:default;}
+  .port-sec{margin-top:18px;}
+  .port-sec-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
+  .port-sec-head .field-label{margin:0;}
+  .port-sec-head .btn-sm{padding:6px 12px;font-size:12.5px;}
+  .port-empty{font-size:13.5px;color:var(--muted);padding:12px 14px;border:1px dashed var(--line);border-radius:12px;}
+  .port-note{font-size:12px;color:var(--faint);line-height:1.7;margin-top:10px;}
+  .al-banner{background:#FFF7ED;border:1px solid #FED7AA;border-radius:12px;padding:10px 14px;margin-bottom:4px;font-size:13.5px;color:#9A3412;}
+  .al-banner b{display:block;}
+  .al-banner ul{margin:4px 0 0;padding-left:18px;}
+  .pq-row.hit{background:#FFF7ED;box-shadow:inset 3px 0 0 #F97316;}
+  .pq-row.hit:hover{background:#FFEDD5;}
+  .pq-sub{display:block;font-size:11.5px;font-weight:500;color:var(--muted);white-space:normal;line-height:1.45;}
+  .pq-sub.hit{color:#C2410C;font-weight:600;}
+  .rank-px .pre,.pt .pre{font-size:11px;color:var(--faint);font-weight:500;margin-right:3px;}
+  .icon-btn.bell-on{color:#C2410C;border-color:#FDBA74;background:#FFF7ED;}
+  .pq-edit{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 13px;background:var(--mist);border-bottom:1px solid var(--line-soft);}
+  .pq-edit:last-child{border-bottom:none;}
+  .pq-edit label{flex:1 1 130px;min-width:0;display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);white-space:nowrap;}
+  .pq-edit .cfg-input{flex:1 1 auto;width:100%;min-width:0;padding:8px 10px;background:var(--white);}
+  .pq-edit .cmd-hint{width:100%;margin-top:0;}
+  .pq-btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  .hold-form{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+  .hold-form .cfg-input{flex:1 1 96px;}
+  .tbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line-soft);border-radius:12px;margin-top:10px;}
+  .pt{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .pt th,.pt td{padding:8px 10px;border-bottom:1px solid var(--line-soft);text-align:right;vertical-align:top;}
+  .pt th{background:var(--mist);color:var(--muted);font-weight:600;font-size:12px;}
+  .pt th:first-child,.pt td:first-child{text-align:left;position:sticky;left:0;z-index:1;background:var(--white);}
+  .pt th:first-child{background:var(--mist);}
+  .pt tbody tr:last-child td{border-bottom:none;}
+  .pt td{font-family:var(--font-disp);font-weight:600;}
+  .pt .nm{font-family:var(--font-body);color:var(--ink);}
+  .pt .sub{display:block;font-family:var(--font-body);font-size:11px;font-weight:500;color:var(--faint);}
+  .pt .sub.up{color:var(--up);} .pt .sub.down{color:var(--down);}
+  .pt td.act{font-family:var(--font-body);}
+  .pt .act .link-btn{color:var(--sky-deep);font-weight:600;}
+  .pt .act .link-btn.del{color:var(--faint);}
+  .pt .act .link-btn.del:hover{color:#B42318;}
 
   /* ---------- 研究指令（/api/command）---------- */
   .cmd-group{margin-bottom:14px;}
@@ -271,11 +346,17 @@
   .foot a{color:var(--sky-deep);text-decoration:none;}
   .foot a:hover{text-decoration:underline;}
 
+  @media (max-width:720px){
+    .tc-grid,.sum-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+  }
   @media (max-width:560px){
     .app{padding:22px 15px 64px;}
     .price-big{font-size:32px;}
     .btn-primary{width:100%;text-align:center;}
     .horizon{height:52px;}
+    .mode-tabs{gap:4px;}
+    .mode-tab{font-size:13px;padding:8px 4px;white-space:nowrap;}
+    .stat{padding:18px 16px;}
   }
   @media (prefers-reduced-motion:reduce){
     .fade{animation:none;}
@@ -310,7 +391,7 @@
       <input id="workerUrl" class="cfg-input" type="text" placeholder="https://你的-worker.workers.dev" autocomplete="off" spellcheck="false" />
       <button id="saveWorker" class="btn-sm primary">儲存</button>
       <button id="testWorker" class="btn-sm ghost">測試連線</button>
-      <div class="cfg-hint">貼上你部署好的 Cloudflare Worker 網址（不含結尾斜線）。程式會呼叫 <code>/api/stock</code>、<code>/api/extra</code> 與 <code>/api/analyze</code>；證交所／櫃買中心資料源是否正常可直接開 <code>/api/debug</code> 檢查。</div>
+      <div class="cfg-hint">貼上你部署好的 Cloudflare Worker 網址（不含結尾斜線）。程式會呼叫 <code>/api/stock</code>、<code>/api/extra</code>、<code>/api/quotes</code> 與 <code>/api/analyze</code>；證交所／櫃買中心資料源是否正常可直接開 <code>/api/debug</code> 檢查。</div>
     </div>
   </details>
 
@@ -331,6 +412,7 @@
       <button class="mode-tab active" data-mode="stock">個股分析</button>
       <button class="mode-tab" data-mode="radar">市場雷達</button>
       <button class="mode-tab" data-mode="cmd">研究指令</button>
+      <button class="mode-tab" data-mode="port">自選持股</button>
     </div>
 
     <div id="modeStock">
@@ -385,6 +467,44 @@
       <div class="cmd-detail" id="cmdDetail"></div>
       <div class="cmd-hist" id="cmdHist"></div>
     </div>
+
+    <div id="modePort" style="display:none;">
+      <p class="panel-lead">一次看<b>自選股即時行情</b>、設定<b>價格警示</b>，再幫你算<b>持股損益</b>。這些設定只存在這台裝置。</p>
+      <div class="port-tools">
+        <button class="btn-sm primary" id="portRefresh">重新整理</button>
+        <button class="btn-sm ghost" id="portAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 60 秒自動更新">自動更新：關</button>
+        <span class="port-status" id="portStatus"></span>
+      </div>
+      <div id="portBanner"></div>
+
+      <div class="port-sec">
+        <div class="port-sec-head">
+          <p class="field-label">自選股行情 · 價格警示</p>
+          <button class="btn-sm ghost" id="portNotify">開啟通知</button>
+        </div>
+        <div id="portWatch"></div>
+        <div class="chips-row" style="margin-top:10px;">
+          <input id="portWatchAdd" class="cfg-input" style="flex:1 1 180px;" type="text" inputmode="numeric"
+                 placeholder="加入自選：代號（例：2330）" autocomplete="off" aria-label="加入自選股代號" />
+          <button class="btn-sm ghost" id="portWatchAddBtn">加入自選</button>
+        </div>
+        <div class="cmd-hint" id="portWatchMsg">點股票可跳到個股分析；按右邊的鈴鐺設定上限價／下限價，到價時會在上方提醒。</div>
+      </div>
+
+      <div class="port-sec">
+        <p class="field-label">持股損益</p>
+        <div id="portSum"></div>
+        <div id="portHold"></div>
+        <div class="hold-form">
+          <input id="hCode" class="cfg-input" type="text" inputmode="numeric" placeholder="代號" autocomplete="off" aria-label="持股代號" />
+          <input id="hShares" class="cfg-input" type="text" inputmode="numeric" placeholder="股數（1 張＝1000）" autocomplete="off" aria-label="股數" />
+          <input id="hCost" class="cfg-input" type="text" inputmode="decimal" placeholder="每股成本" autocomplete="off" aria-label="每股成本" />
+          <button class="btn-sm primary" id="hAdd">加入／更新</button>
+        </div>
+        <div class="cmd-hint" id="hMsg">同一檔再加入一次，會用新的股數與成本覆蓋原本的紀錄。</div>
+        <div class="port-note">怎麼算：市值＝現價×股數；未實現損益＝市值－買進成本－預估賣出費用。賣出費用以手續費 0.1425%（最低 20 元，未計券商折扣）加證交稅估算，一般股票 0.3%、代號 00 開頭的 ETF 0.1%，債券 ETF（代號結尾是 B，例如 00679B）目前免證交稅。買進手續費請自行併入每股成本；還沒有成交價時以昨收價估算。數字僅供參考，實際以券商對帳單為準。</div>
+      </div>
+    </div>
   </section>
 
   <section class="panel" id="cmdResultWrap" style="display:none;">
@@ -419,6 +539,7 @@
 
   <section class="result" id="result" aria-live="polite">
     <div id="statCard"></div>
+    <div id="techCard"></div>
     <div id="extraCard"></div>
     <div class="an-wrap" id="anWrap" style="display:none;">
       <div class="an-head">
@@ -467,7 +588,7 @@
   function lsSet(k,v){ try{localStorage.setItem(k,v);}catch(e){} }
 
   var qEl=$("q"), goEl=$("go"), hintEl=$("hint");
-  var resultEl=$("result"), statCard=$("statCard"), extraCard=$("extraCard"), anWrap=$("anWrap"), anArea=$("anArea"), anTabs=$("anTabs");
+  var resultEl=$("result"), statCard=$("statCard"), techCard=$("techCard"), extraCard=$("extraCard"), anWrap=$("anWrap"), anArea=$("anArea"), anTabs=$("anTabs");
   var copyBtn=$("copyBtn"), copyTxt=$("copyTxt");
   var errorEl=$("error"), errText=$("errText"), retryBtn=$("retryBtn");
   var cfgEl=$("cfg"), urlInput=$("workerUrl"), sdot=$("sdot"), sstat=$("sstat");
@@ -475,7 +596,7 @@
   var watchRow=$("watchRow"), watchChips=$("watchChips");
 
   var state = { scen:"overview", code:null, name:"", snapshot:null, extra:null, text:"", lastTry:null };
-  var busy = false, anTimer=null;
+  var busy = false, anTimer=null, queued=null;   // queued：忙碌時點了別檔，等手上的工作結束再自動切換
 
   // ---------- Worker 網址 ----------
   function getBase(){ return (urlInput.value.trim() || lsGet("skyline_worker") || DEFAULT_WORKER || "").replace(/\/+$/,""); }
@@ -510,7 +631,9 @@
   $("testWorker").addEventListener("click", testConn);
 
   // ---------- 最近查過 ----------
-  function loadRecent(){ try{ return JSON.parse(lsGet("skyline_recent")||"[]"); }catch(e){ return []; } }
+  // 只收合法的項目：localStorage 被改壞（不是陣列、少了代號）時當作空清單，不讓整頁壞掉
+  function validChips(v){ return Array.isArray(v) ? v.filter(function(x){ return x && typeof x.c==="string" && x.c; }) : []; }
+  function loadRecent(){ try{ return validChips(JSON.parse(lsGet("skyline_recent")||"[]")); }catch(e){ return []; } }
   function saveRecent(code, name){
     var list = loadRecent().filter(function(x){ return x.c !== code; });
     list.unshift({ c:code, n:(name||"").slice(0,10) });
@@ -523,7 +646,7 @@
     var html = "";
     for(var i=0;i<list.length;i++){
       var it = list[i];
-      html += '<button class="chip-eg" data-code="'+it.c+'">'+(it.n? esc(it.n)+" " : "")+it.c+'</button>';
+      html += '<button class="chip-eg" data-code="'+escAttr(it.c)+'">'+(it.n? esc(it.n)+" " : "")+esc(it.c)+'</button>';
     }
     recentChips.innerHTML = html;
     recentRow.style.display = "flex";
@@ -531,8 +654,12 @@
 
   // ---------- 自選股 ----------
   var watchEdit = false;
-  function loadWatch(){ try{ return JSON.parse(lsGet("skyline_watch")||"[]"); }catch(e){ return []; } }
-  function saveWatchList(list){ lsSet("skyline_watch", JSON.stringify(list.slice(0,20))); renderWatch(); }
+  function loadWatch(){ try{ return validChips(JSON.parse(lsGet("skyline_watch")||"[]")); }catch(e){ return []; } }
+  function saveWatchList(list){
+    lsSet("skyline_watch", JSON.stringify(list.slice(0,20)));
+    renderWatch();
+    if(mode==="port") renderPort();   // 自選持股分頁開著時同步重畫
+  }
   function isWatched(code){ return loadWatch().some(function(x){ return x.c===code; }); }
   function addWatch(code, name){
     var list = loadWatch().filter(function(x){ return x.c!==code; });
@@ -549,10 +676,10 @@
     var list = loadWatch();
     var html="";
     for(var i=0;i<list.length;i++){
-      var it=list[i], label=(it.n? esc(it.n)+" " : "")+it.c;
+      var it=list[i], label=(it.n? esc(it.n)+" " : "")+esc(it.c);
       html += watchEdit
-        ? '<button class="chip-eg chip-del" data-code="'+it.c+'" title="點擊刪除">✕ '+label+'</button>'
-        : '<button class="chip-eg" data-code="'+it.c+'">★ '+label+'</button>';
+        ? '<button class="chip-eg chip-del" data-code="'+escAttr(it.c)+'" title="點擊刪除">✕ '+label+'</button>'
+        : '<button class="chip-eg" data-code="'+escAttr(it.c)+'">★ '+label+'</button>';
     }
     if(!list.length){
       html = '<span style="font-size:12.5px;color:var(--faint);">'
@@ -563,6 +690,7 @@
     $("watchEditBtn").textContent = watchEdit ? "完成" : (list.length ? "編輯" : "＋ 新增自選");
     $("watchEditRow").style.display = watchEdit ? "flex" : "none";
     watchRow.style.display = "flex";
+    syncStar();
   }
   function watchAdd(){
     var raw = $("watchAddInput").value.trim();
@@ -626,29 +754,211 @@
   }
   function mmdd(isoDate){ var m=String(isoDate).match(/\d{4}-(\d{2})-(\d{2})/); return m? m[1]+"/"+m[2] : String(isoDate); }
 
-  // ---------- 走勢圖 ----------
-  function sparkline(hist){
-    if(!hist || hist.length<2) return { svg:"", meta:"" };
-    var xs=hist.map(function(h){return h.close;});
-    var min=Math.min.apply(null,xs), max=Math.max.apply(null,xs), rng=(max-min)||1;
-    var W=600,H=56,n=hist.length;
-    var px=[], py=[];
-    for(var i=0;i<n;i++){
-      px.push((i/(n-1))*W);
-      py.push(H-4-((xs[i]-min)/rng)*(H-8));
+  // ---------- 技術分析：K 線＋均線＋成交量（純 SVG，不靠外部套件）----------
+  // 圖寬用 viewBox 拉伸（preserveAspectRatio="none"），高度固定 250px，所以 y 座標＝實際像素；
+  // 線條加 non-scaling-stroke 才不會被橫向拉粗，文字標籤用 HTML 疊在上面才不會變形
+  var TECH_BARS = { "1m":22, "3m":0 };   // 1 個月約 22 個交易日；3 個月＝後端給的全部日 K（0 代表全部）
+  var MA_LINES = [[5,"#F59E0B","MA5"],[20,"#0284C7","MA20"],[60,"#8B5CF6","MA60"]];
+  var tech = { hist:[], ma:{}, view:null, range:(lsGet("skyline_tech_range")==="1m" ? "1m" : "3m") };
+
+  function smaSeries(xs, n){
+    var out=[], sum=0;
+    for(var i=0;i<xs.length;i++){
+      sum += xs[i];
+      if(i>=n) sum -= xs[i-n];
+      out.push(i>=n-1 ? sum/n : null);
     }
-    var pts=[];
-    for(var j=0;j<n;j++) pts.push(px[j].toFixed(1)+","+py[j].toFixed(1));
-    var up = xs[n-1] >= xs[0];
-    var stroke = up ? "#E11D48" : "#059669";
-    var svg = '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" aria-hidden="true">'
-      + '<polygon points="0,'+H+' '+pts.join(" ")+' '+W+','+H+'" fill="'+stroke+'" opacity="0.07"/>'
-      + '<polyline points="'+pts.join(" ")+'" fill="none" stroke="'+stroke+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'
-      + '<circle cx="'+px[n-1].toFixed(1)+'" cy="'+py[n-1].toFixed(1)+'" r="3.4" fill="'+stroke+'"/>'
-      + '</svg>';
-    var meta = '<span>近 '+n+' 個交易日（'+mmdd(hist[0].date)+'～'+mmdd(hist[n-1].date)+'）</span>'
-             + '<span>高 '+fmt(max,2)+' · 低 '+fmt(min,2)+'</span>';
-    return { svg:svg, meta:meta };
+    return out;
+  }
+
+  function techSignals(t){
+    var s = t.signals || [];
+    if(!s.length) return "";
+    return '<div class="sigs"><span class="row-k">訊號（紅偏多・綠偏空）</span>'
+      + s.map(function(x){
+          var tone = (x.tone==="bull" || x.tone==="bear") ? x.tone : "neutral";
+          return '<span class="sig '+tone+'">'+esc(x.label||"")+'</span>';
+        }).join("")
+      + '</div>';
+  }
+
+  // partial：最後一根是盤中資料（成交量還在累積）
+  function techTiles(t, close, partial){
+    var ma=t.ma||{}, kd=t.kd, mc=t.macd, rsi=t.rsi14;
+    function tile(k, v, s){ return '<div class="cell"><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>'; }
+    function maS(v, ex){
+      if(v==null) return ex+"（資料天數不足）";
+      return ex+"；"+(close>=v ? '<span class="up">股價在上方</span>' : '<span class="down">股價在下方</span>');
+    }
+    return '<div class="grid tc-grid">'
+      + tile("MA5 週線", fmt(ma.ma5,2), maS(ma.ma5, "近 5 日平均價，看短線方向"))
+      + tile("MA20 月線", fmt(ma.ma20,2), maS(ma.ma20, "近 20 日平均價，常用來分辨中期多空"))
+      + tile("MA60 季線", fmt(ma.ma60,2), maS(ma.ma60, "近 60 日平均價，看較長的趨勢"))
+      + tile("RSI（14 日）", fmt(rsi,1), "衡量最近漲跌力道，70 以上偏熱、30 以下偏冷")
+      + tile("KD（9 日）", kd ? "K "+fmt(kd.k,1)+" · D "+fmt(kd.d,1) : "—",
+             "股價在近 9 日高低區間的位置，80 以上偏高、20 以下偏低")
+      + tile("MACD", mc ? "DIF "+fmt(mc.dif,2) : "—",
+             mc ? '柱狀 OSC <span class="'+cls(mc.hist)+'">'+sign(mc.hist)+fmt(mc.hist,2)+'</span>；由負轉正偏多、由正轉負偏空'
+                : "比較快慢均線的差距看趨勢（約需 35 個交易日）")
+      + tile("量比", t.volRatio==null ? "—" : fmt(t.volRatio,2)+" 倍",
+             "今天成交量是前 5 日平均的幾倍，大於 1 代表比平常熱絡"+(partial ? "；盤中量還在累積，收盤前會偏低" : ""))
+      + tile("20 日高低", (t.high20==null || t.low20==null) ? "—" : "高 "+fmt(t.high20,2)+"<br>低 "+fmt(t.low20,2),
+             "近 20 日的最高與最低價，常被當成短線的壓力與支撐")
+      + '</div>';
+  }
+
+  function renderTech(snap){
+    var hist = (snap.history||[]).filter(function(h){ return h && h.close!=null && isFinite(h.close); });
+    var t = snap.technical || null;
+    tech.view = null;
+    if(hist.length<2){ tech.hist=[]; techCard.innerHTML=""; return; }
+    tech.hist = hist;
+    var closes = hist.map(function(h){ return +h.close; });
+    tech.ma = {};
+    for(var i=0;i<MA_LINES.length;i++) tech.ma[MA_LINES[i][0]] = smaSeries(closes, MA_LINES[i][0]);
+
+    var ranges = "";
+    for(var k in TECH_BARS) ranges += '<button class="an-tab'+(k===tech.range?" active":"")+'" data-range="'+k+'">'+(k==="1m"?"1 個月":"3 個月")+'</button>';
+    // 舊版後端沒有 technical：只畫 K 線圖，不顯示指標
+    var partial = t ? (t.volPartial!=null ? !!t.volPartial : !!hist[hist.length-1].live) : false;
+    var body = t ? techSignals(t) + techTiles(t, closes[closes.length-1], partial)
+                 : (hist.length<20 ? '<div class="note">交易天數不足 20 天，暫時不計算技術指標。</div>' : "");
+    var basis = (t && t.asOf) ? "指標依 "+esc(mmdd(t.asOf))+" 前 "+fmt(t.bars)+" 個交易日計算。" : "";
+
+    techCard.innerHTML = '<div class="stat tech-card fade">'
+      + '<div class="ex-head"><span class="an-title">技術分析</span><div class="tc-range" id="tcRange">'+ranges+'</div></div>'
+      + '<div class="tc-legend" id="tcLegend"></div>'
+      + '<div class="tc-info" id="tcInfo"></div>'
+      + '<div class="tc-chart" id="tcChart" role="img" aria-label="K 線圖與成交量"></div>'
+      + '<div class="tc-meta" id="tcMeta"></div>'
+      + body
+      + '<div class="tc-disc">'+basis+'技術指標僅供參考，不構成投資建議。</div>'
+      + '</div>';
+
+    drawTechChart();
+    $("tcRange").addEventListener("click", function(e){
+      var b = e.target.closest("[data-range]"); if(!b) return;
+      tech.range = b.getAttribute("data-range");
+      lsSet("skyline_tech_range", tech.range);
+      var all = this.querySelectorAll("[data-range]");
+      for(var j=0;j<all.length;j++) all[j].classList.toggle("active", all[j].getAttribute("data-range")===tech.range);
+      drawTechChart();
+    });
+    var ch = $("tcChart");
+    // 輕點用 pointerdown：它帶的是手指實際位置（click 在觸控螢幕會被瀏覽器校正座標，可能選到隔壁那天）
+    ch.addEventListener("pointermove", techPointer);
+    ch.addEventListener("pointerdown", techPointer);
+    ch.addEventListener("pointerleave", function(e){ if(e.pointerType==="mouse") techPick(-1); });
+  }
+
+  function drawTechChart(){
+    var all=tech.hist, N=all.length, s=Math.max(0, N-(TECH_BARS[tech.range]||N));
+    var bars=all.slice(s), n=bars.length, i, b;
+    var W=1000, PT=22, PB=178, VT=202, VB=248;   // 價格區 22–178、成交量區 202–248（單位＝px）
+    // 多數 K 棒有開高低才畫蠟燭，否則（舊版資料只有收盤）改畫收盤折線
+    var ohlc=0;
+    for(i=0;i<n;i++){ b=bars[i]; if(b.open!=null && b.high!=null && b.low!=null) ohlc++; }
+    var candle = ohlc*2 >= n;
+    var hi=-Infinity, lo=Infinity, hiI=0, loI=0, vmax=0;
+    for(i=0;i<n;i++){
+      b=bars[i];
+      var h=(candle && b.high!=null) ? b.high : b.close, l=(candle && b.low!=null) ? b.low : b.close;
+      if(h>hi){ hi=h; hiI=i; }
+      if(l<lo){ lo=l; loI=i; }
+      if(b.volumeLots>vmax) vmax=b.volumeLots;
+    }
+    var top=hi, bot=lo;
+    MA_LINES.forEach(function(m){
+      for(var j=s;j<N;j++){ var v=tech.ma[m[0]][j]; if(v!=null){ if(v>top) top=v; if(v<bot) bot=v; } }
+    });
+    var pad=(top-bot)*0.06 || top*0.01 || 1;
+    top+=pad; bot-=pad;
+    var slot=W/n, bw=Math.max(1, slot*0.64);
+    function X(k){ return slot*(k+0.5); }
+    function Y(v){ return PT+(top-v)/(top-bot)*(PB-PT); }
+    function f1(v){ return v.toFixed(1); }
+    var NS=' vector-effect="non-scaling-stroke"';
+    var svg='<svg viewBox="0 0 '+W+' 250" preserveAspectRatio="none" aria-hidden="true">', lbls="";
+
+    // 格線與價位
+    var gd = top>=1000 ? 0 : (top>=100 ? 1 : 2);
+    for(i=1;i<=3;i++){
+      var gy=PT+(PB-PT)*i/4;
+      svg += '<line x1="0" x2="'+W+'" y1="'+f1(gy)+'" y2="'+f1(gy)+'" stroke="#E4F1F8" stroke-width="1"'+NS+'/>';
+      lbls += '<span class="tc-lbl gl" style="top:'+Math.round(gy-7)+'px">'+fmt(top-(top-bot)*i/4, gd)+'</span>';
+    }
+    svg += '<line x1="0" x2="'+W+'" y1="'+VB+'" y2="'+VB+'" stroke="#DCEAF2" stroke-width="1"'+NS+'/>';
+    lbls += '<span class="tc-lbl vl" style="top:'+(VT-13)+'px">成交量</span>';
+
+    // K 棒與成交量（紅＝收高、綠＝收低；沒有開盤價時跟前一天收盤比）
+    var line=[];
+    for(i=0;i<n;i++){
+      b=bars[i];
+      var x=X(i), prev=(s+i>0) ? all[s+i-1].close : null;
+      var up = (candle && b.open!=null) ? b.close>=b.open : (prev==null || b.close>=prev);
+      var col = up ? "#E11D48" : "#059669";
+      if(candle){
+        if(b.high!=null && b.low!=null)
+          svg += '<line x1="'+f1(x)+'" x2="'+f1(x)+'" y1="'+f1(Y(b.high))+'" y2="'+f1(Y(b.low))+'" stroke="'+col+'" stroke-width="1"'+NS+'/>';
+        if(b.open!=null){
+          var y1=Y(Math.max(b.open,b.close)), y2=Y(Math.min(b.open,b.close));
+          svg += '<rect x="'+f1(x-bw/2)+'" y="'+f1(y1)+'" width="'+f1(bw)+'" height="'+f1(Math.max(1,y2-y1))+'" fill="'+col+'"/>';
+        } else {
+          svg += '<rect x="'+f1(x-bw/2)+'" y="'+f1(Y(b.close)-1)+'" width="'+f1(bw)+'" height="2" fill="'+col+'"/>';
+        }
+      } else line.push(f1(x)+","+f1(Y(b.close)));
+      if(b.volumeLots!=null && vmax>0){
+        var vh=Math.max(1, b.volumeLots/vmax*(VB-VT));
+        svg += '<rect x="'+f1(x-bw/2)+'" y="'+f1(VB-vh)+'" width="'+f1(bw)+'" height="'+f1(vh)+'" fill="'+col+'" opacity=".42"/>';
+      }
+    }
+    if(line.length>1) svg += '<polyline points="'+line.join(" ")+'" fill="none" stroke="#0369A1" stroke-width="2" stroke-linejoin="round"'+NS+'/>';
+
+    // 均線
+    var legend = "";
+    MA_LINES.forEach(function(m){
+      var pts=[], ser=tech.ma[m[0]];
+      for(var j=0;j<n;j++){ var v=ser[s+j]; if(v!=null) pts.push(f1(X(j))+","+f1(Y(v))); }
+      if(pts.length>1) svg += '<polyline points="'+pts.join(" ")+'" fill="none" stroke="'+m[1]+'" stroke-width="1.5" stroke-linejoin="round"'+NS+'/>';
+      var last=ser[N-1];
+      legend += '<span><i style="background:'+m[1]+'"></i>'+m[2]+' <b>'+(last==null ? "—" : fmt(last,2))+'</b></span>';
+    });
+    svg += '</svg>';
+
+    // 區間最高／最低標籤（靠邊時往內對齊，避免超出卡片）
+    function at(k){ var p=X(k)/W*100; return "left:"+p.toFixed(2)+"%;transform:translateX("+(p<12 ? "0" : (p>88 ? "-100%" : "-50%"))+");"; }
+    lbls += '<span class="tc-lbl" style="'+at(hiI)+'top:'+Math.max(0, Math.round(Y(hi)-16))+'px">高 '+fmt(hi,2)+'</span>'
+          + '<span class="tc-lbl" style="'+at(loI)+'top:'+Math.round(Y(lo)+3)+'px">低 '+fmt(lo,2)+'</span>';
+
+    $("tcChart").innerHTML = svg + lbls + '<div class="tc-guide" id="tcGuide"></div>';
+    $("tcLegend").innerHTML = legend;
+    $("tcMeta").innerHTML = '<span>近 '+n+' 個交易日（'+esc(mmdd(bars[0].date))+'～'+esc(mmdd(bars[n-1].date))+'）</span>'
+      + '<span>'+(candle ? "紅 K 收高、綠 K 收低" : "收盤價走勢")+'；下方柱狀為成交量</span>';
+    tech.view = { s:s, n:n, bars:bars };
+    techPick(-1);
+  }
+
+  // 點／滑到某一天：上方資訊列顯示當日開高低收與成交量；k<0 代表回到最新一天
+  function techPick(k){
+    var v=tech.view, info=$("tcInfo"); if(!v || !info) return;
+    var latest = k<0; if(latest) k=v.n-1;
+    var b=v.bars[k], gi=v.s+k, prev=gi>0 ? tech.hist[gi-1].close : null;
+    var pct = prev ? (b.close-prev)/prev*100 : null;
+    var g=$("tcGuide");
+    if(g){ g.style.display = latest ? "none" : "block"; g.style.left = ((k+0.5)/v.n*100).toFixed(2)+"%"; }
+    info.innerHTML = '<span><b>'+esc(mmdd(b.date))+'</b>'+(b.live ? "（盤中）" : (latest ? "（最新）" : ""))+'</span>'
+      + (b.open!=null ? '<span>開 <b>'+fmt(b.open,2)+'</b></span>' : '')
+      + (b.high!=null ? '<span>高 <b>'+fmt(b.high,2)+'</b></span>' : '')
+      + (b.low!=null ? '<span>低 <b>'+fmt(b.low,2)+'</b></span>' : '')
+      + '<span>收 <b class="'+cls(pct||0)+'">'+fmt(b.close,2)+'</b>'+(pct==null ? '' : ' <span class="'+cls(pct)+'">'+sign(pct)+fmt(pct,2)+'%</span>')+'</span>'
+      + '<span>量 <b>'+fmt(b.volumeLots)+'</b> 張</span>'
+      + (latest ? '<span class="tip">點圖表可看每一天</span>' : '');
+  }
+  function techPointer(e){
+    var v=tech.view, el=$("tcChart"); if(!v || !el) return;
+    var r=el.getBoundingClientRect(); if(!r.width) return;
+    var k=Math.floor((e.clientX-r.left)/r.width*v.n);
+    techPick(Math.max(0, Math.min(v.n-1, k)));
   }
 
   function instItem(label, lots){
@@ -673,7 +983,6 @@
     var chg=p.change, pct=p.changePct;
     var chgTxt = (chg==null) ? "" : (sign(chg)+fmt(chg,2)+(pct==null?"":"  ("+sign(pct)+fmt(pct,2)+"%)"));
     var c = cls(chg==null?0:chg);
-    var sp = sparkline(snap.history);
     var mkt = /上櫃/.test(snap.market||"") ? "上櫃" : (/上市/.test(snap.market||"") ? "上市" : "");
 
     var cells = [
@@ -701,7 +1010,6 @@
       + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>'
       + '</button></div></div>'
       + '<div class="price-row"><div class="price-big '+c+'">'+fmt(p.close,2)+'</div><div class="price-chg '+c+'">'+chgTxt+'</div></div>'
-      + (sp.svg ? '<div class="spark">'+sp.svg+'</div><div class="spark-meta">'+sp.meta+'</div>' : '')
       + '<div class="grid">'+cells+'</div>'
       + instHtml + notesHtml
       + '</div>';
@@ -709,13 +1017,15 @@
     var rb = $("refreshBtn");
     if(rb) rb.addEventListener("click", function(){ if(state.code && !busy) runFull(state.code, true); });
     var sb = $("starBtn");
-    if(sb) sb.addEventListener("click", function(){
-      toggleWatch(snap.code, snap.name);
-      var on = isWatched(snap.code);
-      sb.classList.toggle("star-on", on);
-      var ic = sb.querySelector("svg");
-      if(ic) ic.setAttribute("fill", on ? "currentColor" : "none");
-    });
+    if(sb) sb.addEventListener("click", function(){ toggleWatch(snap.code, snap.name); });
+  }
+  // 星號狀態跟著自選股清單走（在「自選持股」分頁移除時，回來也要正確）
+  function syncStar(){
+    var sb = $("starBtn"); if(!sb || !state.snapshot) return;
+    var on = isWatched(state.snapshot.code);
+    sb.classList.toggle("star-on", on);
+    var ic = sb.querySelector("svg");
+    if(ic) ic.setAttribute("fill", on ? "currentColor" : "none");
   }
 
   // ---------- 基本面・籌碼（/api/extra）----------
@@ -787,6 +1097,11 @@
       var live = s.priceLabel==="盤中即時" ? "（最後一點 "+s.priceDate+" 為盤中即時價 "+String(s.priceTime||"").slice(0,5)+"）" : "";
       c.history = { desc:"每日收盤，格式 [日期, 收盤價]"+live, points: h.map(function(x){ return [x.date, x.close]; }) };
     }
+    if(s.technical){
+      var t = s.technical;
+      c.technical = { asOf:t.asOf, ma:t.ma, rsi14:t.rsi14, kd:t.kd, macd:t.macd, volRatio:t.volRatio, volPartial:!!t.volPartial,
+                      signals:(t.signals||[]).map(function(x){ return x.label; }) };
+    }
     if(state.extra){
       var e = state.extra;
       c.extra = { profile:e.profile, monthlyRevenue:e.monthlyRevenue, quarterly:e.quarterly, dividend:e.dividend,
@@ -841,7 +1156,7 @@
       stopAnLoading();
       anArea.innerHTML='<div class="an-loading">分析失敗：'+esc(err.message)+'　可切換角度或重按分析再試。</div>';
     })
-    .then(function(){ busy=false; goEl.disabled=false; anTabs.classList.remove("lock"); });
+    .then(function(){ busy=false; goEl.disabled=false; anTabs.classList.remove("lock"); runQueued(); });
   }
 
   // ---------- 完整流程：秒讀（行情＋基本面並行）→ 分析 ----------
@@ -865,7 +1180,7 @@
     busy=true; goEl.disabled=true; hideErr();
     state.lastTry=code;
     resultEl.classList.add("show");
-    renderSkeleton(); extraCard.innerHTML="";
+    renderSkeleton(); techCard.innerHTML=""; extraCard.innerHTML="";
     anWrap.style.display="none"; anArea.innerHTML=""; state.text=""; copyBtn.disabled=true;
 
     // 基本面與行情同時發出；等待時間從行情卡出現才開始算，且要比 Worker 單一資料源逾時（12 秒）長
@@ -875,6 +1190,7 @@
       .then(function(snap){
         state.code=code; state.name=snap.name||""; state.snapshot=snap; state.extra=null;
         renderStat(snap);
+        renderTech(snap);
         renderExtraLoading();
         saveRecent(code, snap.name);
         try{ history.replaceState(null, "", "#"+code); }catch(e){}
@@ -888,14 +1204,32 @@
       })
       .catch(function(err){
         busy=false; goEl.disabled=false;
-        statCard.innerHTML=""; extraCard.innerHTML=""; resultEl.classList.remove("show");
+        statCard.innerHTML=""; techCard.innerHTML=""; extraCard.innerHTML=""; resultEl.classList.remove("show");
         showErr(err.message+"　（請確認 Worker 已部署、網址正確；可開啟 Worker 網址加上 /api/debug 檢查證交所／櫃買中心資料源）");
+        runQueued();
       });
+  }
+
+  // 從市場雷達、自選持股點某一檔：手上還有分析在跑時先排隊，跑完自動切換（不然點了會沒反應）
+  var HINT_TXT = hintEl.textContent;
+  function openWhenFree(code){
+    if(!busy){ queued=null; runFull(code); return; }
+    if(code===state.lastTry){ queued=null; hintEl.classList.remove("show"); return; }   // 正在跑的就是這一檔
+    queued = code;
+    hintEl.textContent = "目前還有一項分析在進行，完成後會自動切換到 "+code+"。";
+    hintEl.classList.add("show");
+  }
+  function runQueued(){
+    if(busy || !queued) return;
+    var c=queued; queued=null;
+    hintEl.classList.remove("show"); hintEl.textContent=HINT_TXT;
+    qEl.value=c;
+    runFull(c, mode!=="stock");
   }
 
   function run(){
     var q=qEl.value.trim().toUpperCase();
-    if(!/^\d{4,6}[A-Z]?$/.test(q)){ hintEl.classList.add("show"); qEl.focus(); return; }
+    if(!/^\d{4,6}[A-Z]?$/.test(q)){ hintEl.textContent=HINT_TXT; hintEl.classList.add("show"); qEl.focus(); return; }
     hintEl.classList.remove("show");
     runFull(q);
   }
@@ -951,11 +1285,14 @@
     $("modeStock").style.display = (m==="stock") ? "block" : "none";
     $("modeRadar").style.display = (m==="radar") ? "block" : "none";
     $("modeCmd").style.display = (m==="cmd") ? "block" : "none";
+    $("modePort").style.display = (m==="port") ? "block" : "none";
     $("cmdResultWrap").style.display = (m==="cmd" && cmd.shown) ? "block" : "none";
     resultEl.style.display = (m==="stock") ? "" : "none";
     $("newsWrap").style.display = (m==="stock" && newsOpen) ? "block" : "none";
     hideErr();
     if(m==="cmd") cmdEnter();
+    if(m==="port") portEnter();
+    portTimerSync();
     var tabs = document.querySelectorAll("#modeTabs .mode-tab");
     for(var i=0;i<tabs.length;i++) tabs[i].classList.toggle("active", tabs[i].getAttribute("data-mode")===m);
   }
@@ -997,7 +1334,7 @@
         $("radarArea").innerHTML="";
         showErr("市場掃描失敗："+err.message+"　（若剛更新過 worker.js，請確認新版已重新部署）");
       })
-      .then(function(){ busy=false; $("scanBtn").disabled=false; });
+      .then(function(){ busy=false; $("scanBtn").disabled=false; runQueued(); });
   }
 
   function renderRadar(){
@@ -1032,7 +1369,7 @@
     $("rankList").onclick = function(e){
       var r = e.target.closest(".rank-row"); if(!r) return;
       var code = r.getAttribute("data-code"); if(!code) return;
-      setMode("stock"); qEl.value = code; runFull(code);
+      openStock(code);
     };
     $("radarAiBtn").addEventListener("click", radarAnalyze);
   }
@@ -1092,7 +1429,7 @@
       wrap.scrollIntoView({ behavior:"smooth", block:"start" });
     })
     .catch(function(err){ $("radarAn").innerHTML = '<div class="an-loading">解讀失敗：'+esc(err.message)+'</div>'; })
-    .then(function(){ busy = false; });
+    .then(function(){ busy = false; runQueued(); });
   }
 
   $("scanBtn").addEventListener("click", scanMarket);
@@ -1132,7 +1469,7 @@
       if(newsTimer){ clearInterval(newsTimer); newsTimer=null; }
       $("newsArea").innerHTML = '<div class="an-loading">新聞查詢失敗：'+esc(err.message)+'　（若剛更新過 worker.js，請確認新版已重新部署）</div>';
     })
-    .then(function(){ busy = false; });
+    .then(function(){ busy = false; runQueued(); });
   }
   $("watchNewsBtn").addEventListener("click", fetchNews);
   $("newsRefreshBtn").addEventListener("click", fetchNews);
@@ -1428,6 +1765,476 @@
     if(!needsCode(cmdDef(cmd.sel))) cmd.sel = "initiate";
     setMode("cmd");
     $("modeCmd").scrollIntoView({ behavior:"smooth", block:"start" });
+  });
+
+  // ---------- 自選持股：即時行情、價格警示、持股損益（/api/quotes；設定都存在這台裝置）----------
+  var HOLD_MAX = 50, QUOTE_CHUNK = 30;   // 後端每次最多 30 檔，超過就分批
+  var BELL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+  // unavail：這次連線失敗、暫時拿不到報價的代號；notifyBroken：瀏覽器有通知功能卻不能直接建立（例如 Android Chrome）
+  var port = { quotes:{}, missing:{}, unavail:{}, asOf:null, at:0, loading:false, again:false, err:"", timer:null, edit:null, hits:[], notifyBroken:false };
+
+  function loadAlerts(){ var v=loadJSON("skyline_alerts", {}); return (v && typeof v==="object" && !Array.isArray(v)) ? v : {}; }
+  function saveAlerts(a){ lsSet("skyline_alerts", JSON.stringify(a)); }
+  function loadHold(){ var v=loadJSON("skyline_hold", []); return Array.isArray(v) ? v.filter(function(h){ return h && h.code; }) : []; }
+  function saveHold(list){ lsSet("skyline_hold", JSON.stringify(list.slice(0,HOLD_MAX))); }
+  function twToday(){ return new Date(Date.now()+8*3600*1000).toISOString().slice(0,10); }
+  // 盤中＝台灣時間週一至週五 09:00–13:35（國定假日不另判斷）
+  function isTradingTime(){
+    var t=new Date(Date.now()+8*3600*1000), d=t.getUTCDay(), m=t.getUTCHours()*60+t.getUTCMinutes();
+    return d>=1 && d<=5 && m>=540 && m<=815;
+  }
+  // 有昨收、沒有成交價：開盤前是「尚未開盤」，開盤後是這檔還沒有人成交
+  function noTradeTxt(){
+    var t=new Date(Date.now()+8*3600*1000), d=t.getUTCDay();
+    return (d>=1 && d<=5 && t.getUTCHours()<9) ? "尚未開盤" : "尚無成交";
+  }
+  // 沒有報價時要顯示的文字
+  function noQuoteTxt(c){
+    if(port.missing[c]) return "查無報價";
+    if(port.loading || (!port.at && !port.err)) return "讀取中…";
+    return (port.unavail[c] || port.err) ? "暫時無法取得" : "—";
+  }
+  // 報價所屬的交易日（取最新的一筆）；不是今天代表休市或還沒開盤，顯示的是最近一個交易日的收盤
+  function quoteDate(){
+    var d="";
+    for(var k in port.quotes){ var x=port.quotes[k] && port.quotes[k].date; if(x && x>d) d=x; }
+    return d;
+  }
+  function portAutoOn(){ return lsGet("skyline_port_auto")==="1"; }
+  // 數字欄位：允許千分位逗號；空白回傳 null，格式錯回傳 NaN
+  function parseNum(s){
+    s = String(s||"").replace(/[,，\s]/g,"");
+    if(!s) return null;
+    return /^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN;
+  }
+
+  // 自選股＋持股一起查（同一檔只查一次）
+  function portCodes(){
+    var seen={}, out=[];
+    loadWatch().concat(loadHold().map(function(h){ return { c:h.code }; })).forEach(function(x){
+      if(x.c && !seen[x.c]){ seen[x.c]=1; out.push(x.c); }
+    });
+    return out;
+  }
+
+  function refreshQuotes(){
+    if(port.loading){ port.again=true; return; }
+    var codes=portCodes();
+    if(!codes.length){ renderPort(); return; }
+    var base=getBase();
+    if(!base){ port.err="請先在上方「後端設定」貼上你的 Worker 網址。"; renderPort(); return; }
+    port.loading=true; renderPortStatus();
+    var chunks=[];
+    for(var i=0;i<codes.length;i+=QUOTE_CHUNK) chunks.push(codes.slice(i,i+QUOTE_CHUNK));
+    // 單批失敗不拖累其他批：那幾檔當作暫時拿不到，全部失敗才顯示錯誤
+    Promise.all(chunks.map(function(ch){
+      return getJSON(base+"/api/quotes?codes="+ch.join(",")).catch(function(err){ return { unavailable:ch, err:err }; });
+    }))
+      .then(function(rs){
+        if(rs.every(function(r){ return r.err; })) throw rs[0].err;
+        var q={}, miss={}, un={};
+        rs.forEach(function(r){
+          var qs=r.quotes || {};
+          for(var k in qs) if(qs[k]) q[k]=qs[k];
+          (r.missing || []).forEach(function(c){ miss[c]=1; });
+          if(r.asOf) port.asOf=r.asOf;
+        });
+        // 暫時拿不到的先沿用上一次的報價（狀態列會提醒）
+        rs.forEach(function(r){
+          (r.unavailable || []).forEach(function(c){ un[c]=1; if(!q[c] && port.quotes[c]) q[c]=port.quotes[c]; });
+        });
+        port.quotes=q; port.missing=miss; port.unavail=un; port.at=Date.now(); port.err=""; port.loading=false;
+        fillNames(q);
+        renderPort();
+        fireAlerts(port.hits);
+      })
+      .catch(function(err){
+        port.err="行情讀取失敗："+err.message+"（若剛更新過 worker.js，請確認新版已重新部署）";
+        port.loading=false;   // 先清掉，列表才不會一直顯示「讀取中…」
+        renderPort();
+      })
+      .then(function(){
+        port.loading=false; renderPortStatus();
+        if(port.again){ port.again=false; refreshQuotes(); }
+      });
+  }
+
+  // 只輸入代號加入的股票，用行情回傳的名稱補上
+  function fillNames(q){
+    var w=loadWatch(), h=loadHold(), cw=false, ch=false, i;
+    for(i=0;i<w.length;i++) if(!w[i].n && q[w[i].c] && q[w[i].c].name){ w[i].n=String(q[w[i].c].name).slice(0,10); cw=true; }
+    for(i=0;i<h.length;i++) if(!h[i].name && q[h[i].code] && q[h[i].code].name){ h[i].name=String(q[h[i].code].name).slice(0,10); ch=true; }
+    if(cw){ lsSet("skyline_watch", JSON.stringify(w)); renderWatch(); }
+    if(ch) saveHold(h);
+  }
+
+  // ----- 價格警示 -----
+  function alertTxt(a){
+    if(!a) return "";
+    var p=[];
+    if(a.up!=null) p.push("漲到 "+fmt(a.up,2));
+    if(a.dn!=null) p.push("跌到 "+fmt(a.dn,2));
+    return p.length ? "警示："+p.join("／") : "";
+  }
+  function alertHits(){
+    var al=loadAlerts(), out=[];
+    loadWatch().forEach(function(it){
+      var a=al[it.c], q=port.quotes[it.c];
+      if(!a || !q || q.close==null) return;   // 還沒開盤（沒有成交價）不判斷
+      // approx：這 5 秒內沒成交，現價是最佳買／賣價暫代，提醒文字標「約」
+      var nm=(it.n||q.name||it.c)+"（"+it.c+"）", px=" 現價"+(q.approx ? "約 " : " ")+fmt(q.close,2), day=q.date || twToday();
+      if(a.up!=null && q.close>=a.up) out.push({ code:it.c, dir:"up", day:day, text:nm+px+"，已漲到上限價 "+fmt(a.up,2) });
+      if(a.dn!=null && q.close<=a.dn) out.push({ code:it.c, dir:"dn", day:day, text:nm+px+"，已跌到下限價 "+fmt(a.dn,2) });
+    });
+    return out;
+  }
+  function notifySupported(){ return typeof window.Notification!=="undefined"; }
+  function notifyOn(){ return notifySupported() && !port.notifyBroken && Notification.permission==="granted" && lsGet("skyline_notify")==="1"; }
+  // 建立系統通知；瀏覽器不允許直接建立（例如 Android Chrome 會丟錯）時回傳 false，並記下來改成只在頁面上提醒
+  function showNotify(title, body, tag){
+    try{ new Notification(title, { body:body, tag:tag }); return true; }
+    catch(e){ port.notifyBroken=true; return false; }
+  }
+  // 系統通知：同一檔同一方向，每個交易日最多一次（以報價日期為準，週末不會因為週五的收盤價再通知）
+  // iPhone Safari 沒有 Notification，只顯示頁面上的提醒
+  function fireAlerts(hits){
+    if(!hits.length || !notifyOn()) return;
+    var fired=loadJSON("skyline_alert_fired", {}), cut=new Date(Date.now()-7*86400000).toISOString().slice(0,10), k;
+    if(!fired || typeof fired!=="object") fired={};
+    for(k in fired) if(!(fired[k]>=cut)) delete fired[k];   // 一週前的紀錄清掉，免得越存越多
+    for(var i=0;i<hits.length;i++){
+      var h=hits[i], key=h.code+"_"+h.dir;
+      if(fired[key]===h.day) continue;
+      if(!showNotify("台股天際線 · 價格警示", h.text, key)){ renderNotifyBtn(); break; }   // 沒跳出來就不算通知過
+      fired[key]=h.day;
+    }
+    lsSet("skyline_alert_fired", JSON.stringify(fired));
+  }
+  function renderNotifyBtn(){
+    var b=$("portNotify");
+    b.classList.remove("on");
+    if(!notifySupported() || port.notifyBroken){
+      b.textContent = notifySupported() ? "此瀏覽器無法直接跳出通知" : "此瀏覽器不支援通知";
+      b.disabled=true; b.title="觸發的警示仍會顯示在本頁上方"; return;
+    }
+    if(Notification.permission==="denied"){ b.textContent="通知已被封鎖"; b.disabled=true; b.title="請到瀏覽器的網站設定允許通知"; return; }
+    var on=notifyOn();
+    b.disabled=false; b.classList.toggle("on", on);
+    b.textContent = on ? "通知：開（按一下關閉）" : "開啟通知";
+    b.title = "到價時跳出系統通知（每檔每天最多一次，需開著這個頁面）";
+  }
+  function toggleNotify(){
+    if(!notifySupported()) return;
+    if(notifyOn()){ lsSet("skyline_notify","0"); renderNotifyBtn(); return; }
+    var called=false;
+    function done(p){
+      if(called) return;   // 新版瀏覽器會同時呼叫 callback 又回傳 Promise，只處理一次
+      called=true;
+      // 先跳一則確認通知：建立不了（例如 Android Chrome）就不要顯示成「已開啟」
+      if(p==="granted" && showNotify("台股天際線", "通知已開啟，到價時會在這裡提醒你。", "skyline_on")){
+        lsSet("skyline_notify","1"); fireAlerts(port.hits);
+      }
+      renderNotifyBtn();
+    }
+    if(Notification.permission==="granted"){ done("granted"); return; }
+    try{
+      var r=Notification.requestPermission(done);   // 舊版 Safari 用 callback，新版回傳 Promise
+      if(r && typeof r.then==="function") r.then(done);
+    }catch(e){ renderNotifyBtn(); }
+  }
+
+  function alertEditor(c, a){
+    a = a || {};
+    return '<div class="pq-edit">'
+      + '<label>上限價<input id="alUp" data-code="'+escAttr(c)+'" class="cfg-input" type="text" inputmode="decimal" placeholder="漲到多少" autocomplete="off" value="'+(a.up!=null ? escAttr(a.up) : "")+'" /></label>'
+      + '<label>下限價<input id="alDn" class="cfg-input" type="text" inputmode="decimal" placeholder="跌到多少" autocomplete="off" value="'+(a.dn!=null ? escAttr(a.dn) : "")+'" /></label>'
+      + '<div class="pq-btns"><button class="btn-sm primary" data-act="al-save">儲存</button>'
+      + (a.up!=null || a.dn!=null ? '<button class="btn-sm ghost" data-act="al-clear">清除警示</button>' : '')
+      + '<button class="link-btn" data-act="unwatch">移出自選</button></div>'
+      + '<div class="cmd-hint" id="alMsg">股價漲到上限（含）或跌到下限（含）時提醒你，只填一邊也可以。</div>'
+      + '</div>';
+  }
+  function saveAlertEdit(){
+    var c=port.edit; if(!c) return;
+    var up=parseNum($("alUp").value), dn=parseNum($("alDn").value), msg=$("alMsg");
+    function bad(t){ msg.className="cmd-hint warn"; msg.textContent=t; }
+    if(isNaN(up) || isNaN(dn) || up===0 || dn===0) return bad("價格請填大於 0 的數字，例如 1050 或 85.5。");
+    if(up==null && dn==null) return bad("請至少填一個價格；不需要警示可按「清除警示」。");
+    if(up!=null && dn!=null && up<=dn) return bad("上限價要比下限價高。");
+    var al=loadAlerts();
+    al[c]={ up:up, dn:dn };
+    saveAlerts(al);
+    // 改了價位就重新計算「今天通知過沒」
+    var fired=loadJSON("skyline_alert_fired", {});
+    if(fired && typeof fired==="object"){ delete fired[c+"_up"]; delete fired[c+"_dn"]; lsSet("skyline_alert_fired", JSON.stringify(fired)); }
+    port.edit=null;
+    renderPort();
+    fireAlerts(port.hits);
+  }
+
+  // ----- 持股損益 -----
+  // 預估賣出費用：手續費 0.1425%（最低 20 元）＋證交稅（股票 0.3%、00 開頭 ETF 0.1%、債券 ETF 目前停徵），不含券商折扣
+  function taxPermille(code){ return /^00\d{3,4}B$/.test(code) ? 0 : (/^00/.test(code) ? 1 : 3); }   // 千分之幾
+  function holdCalc(h, q){
+    if(!q) return null;
+    var px = q.close!=null ? q.close : q.prevClose;
+    if(px==null) return null;
+    // 市值先換成「分」的整數再算費用，避免小數誤差（例如 38.05×50000）讓四捨五入差 1 元
+    var cents=Math.round(px*100)*h.shares, mv=cents/100, cost=h.cost*h.shares;
+    var fee=Math.max(20, Math.round(cents*1425/1e8));
+    var tax=Math.round(cents*taxPermille(h.code)/1e5);
+    var pnl=mv-cost-fee-tax;
+    return { px:px, est:q.close==null, mv:mv, cost:cost, fee:fee, tax:tax, pnl:pnl, ret:cost ? pnl/cost : null,
+             today:(q.close!=null && q.change!=null) ? q.change*h.shares : null };
+  }
+  function signed(v, d){ return sign(v)+fmt(v, d||0); }
+
+  function renderPortHold(){
+    var list=loadHold(), el=$("portHold"), sumEl=$("portSum");
+    if(!list.length){
+      sumEl.innerHTML="";
+      el.innerHTML='<div class="port-empty">還沒有持股紀錄。在下方輸入代號、股數與每股成本，就能算出市值與損益。</div>';
+      return;
+    }
+    var T={ mv:0, cost:0, pnl:0, today:0, n:0, miss:0 }, rows="";
+    // 報價不是今天的（週末、假日或盤前）：「今日損益」其實是最近一個交易日的漲跌
+    var qd=quoteDate(), dayLbl=(qd && qd!==twToday()) ? mmdd(qd)+" 損益" : "今日損益";
+    list.forEach(function(h){
+      var q=port.quotes[h.code], r=holdCalc(h, q), nm=h.name || (q && q.name) || "";
+      if(r){ T.mv+=r.mv; T.cost+=r.cost; T.pnl+=r.pnl; if(r.today!=null) T.today+=r.today; T.n++; } else T.miss++;
+      var c=escAttr(h.code), cells;
+      if(r){
+        var chg = r.est ? "昨收（"+noTradeTxt()+"）"
+          : (q.change==null ? "—" : '<span class="'+cls(q.change)+'">'+signed(q.change,2)+(q.changePct==null ? "" : "（"+signed(q.changePct,2)+"%）")+'</span>');
+        cells = '<td>'+(q.approx && !r.est ? '<span class="pre">約</span>' : '')+fmt(r.px,2)+'<span class="sub">'+chg+'</span></td>'
+          + '<td class="'+cls(r.pnl)+'">'+signed(r.pnl)+'<span class="sub '+cls(r.pnl)+'">'+(r.ret==null ? "—" : signed(r.ret*100,2)+"%")+'</span></td>'
+          + '<td class="'+(r.today==null ? "flat" : cls(r.today))+'">'+(r.today==null ? "—" : signed(r.today))+'</td>'
+          + '<td>'+fmt(r.mv)+'<span class="sub">賣出費用約 '+fmt(r.fee+r.tax)+'</span></td>';
+      } else {
+        cells = '<td colspan="4" class="flat">'+noQuoteTxt(h.code)+'</td>';
+      }
+      rows += '<tr data-code="'+c+'">'
+        + '<td><span class="nm">'+esc(nm || h.code)+'</span><span class="sub">'+esc(h.code)+(r && r.est ? " · 以昨收估" : "")+'</span></td>'
+        + cells
+        + '<td>'+fmt(h.shares)+'<span class="sub">'+(h.shares%1000===0 ? fmt(h.shares/1000)+" 張" : "股")+'</span></td>'
+        + '<td>'+fmt(h.cost,2)+'<span class="sub">共 '+fmt(h.cost*h.shares)+'</span></td>'
+        + '<td class="act"><button class="link-btn" data-hedit="'+c+'">修改</button><button class="link-btn del" data-hdel="'+c+'">刪除</button></td>'
+        + '</tr>';
+    });
+    el.innerHTML = '<div class="tbl-scroll"><table class="pt"><thead><tr>'
+      + '<th>股票</th><th>現價</th><th>未實現損益</th><th>'+dayLbl+'</th><th>市值</th><th>股數</th><th>每股成本</th><th></th>'
+      + '</tr></thead><tbody>'+rows+'</tbody></table></div>';
+
+    function cell(k, v, s){ return '<div class="cell"><div class="k">'+k+'</div><div class="v">'+v+'</div>'+(s ? '<div class="s">'+s+'</div>' : '')+'</div>'; }
+    sumEl.innerHTML = T.n ? '<div class="grid sum-grid">'
+        + cell("總市值", fmt(T.mv))
+        + cell("總成本", fmt(T.cost))
+        + cell("總未實現損益", '<span class="'+cls(T.pnl)+'">'+signed(T.pnl)+'</span>',
+               T.cost ? '報酬率 <span class="'+cls(T.pnl)+'">'+signed(T.pnl/T.cost*100,2)+'%</span>' : "")
+        + cell(dayLbl, '<span class="'+cls(T.today)+'">'+signed(T.today)+'</span>')
+        + '</div>'
+        + (T.miss ? '<div class="data-date">有 '+T.miss+' 筆暫時沒有報價，未計入合計。</div>' : "")
+      : "";
+  }
+
+  function holdAdd(){
+    var cEl=$("hCode"), sEl=$("hShares"), kEl=$("hCost"), msg=$("hMsg");
+    function bad(t, el){ msg.className="cmd-hint warn"; msg.textContent=t; el.focus(); }
+    var code=cEl.value.trim().toUpperCase(), sh=parseNum(sEl.value), cost=parseNum(kEl.value);
+    if(!/^\d{4,6}[A-Z]?$/.test(code)) return bad("股票代號格式不對，請輸入 4～6 位數字，例如 2330、0050。", cEl);
+    if(sh==null || isNaN(sh) || sh%1!==0 || sh<1 || sh>1e9) return bad("股數請填正整數（1 張＝1000 股；零股就填實際股數）。", sEl);
+    if(cost==null || isNaN(cost) || cost<=0 || cost>1e6) return bad("每股成本請填大於 0 的數字，例如 580 或 85.5。", kEl);
+    var list=loadHold(), idx=-1;
+    for(var i=0;i<list.length;i++) if(list[i].code===code) idx=i;
+    if(idx<0 && list.length>=HOLD_MAX) return bad("持股最多記錄 "+HOLD_MAX+" 筆，請先刪除不需要的。", cEl);
+    var name=(idx>=0 && list[idx].name) || nameOf(code) || (port.quotes[code] && port.quotes[code].name) || "";
+    var item={ code:code, name:String(name).slice(0,10), shares:sh, cost:Math.round(cost*10000)/10000 };
+    if(idx>=0) list[idx]=item; else list.push(item);
+    saveHold(list);
+    cEl.value=""; sEl.value=""; kEl.value="";
+    msg.className="cmd-hint";
+    msg.textContent=(idx>=0 ? "已更新 " : "已加入 ")+(item.name ? item.name+" " : "")+code+"。";
+    renderPort();
+    if(!port.quotes[code]) refreshQuotes();
+  }
+
+  // ----- 自選股行情列表 -----
+  function renderPortWatch(){
+    var el=$("portWatch"), list=loadWatch(), al=loadAlerts(), hitSet={};
+    port.hits.forEach(function(h){ hitSet[h.code]=1; });
+    // 正在設定警示的股票已在別處移出自選：關掉編輯框（要先判斷，下面才不會去還原已不存在的輸入框）
+    if(port.edit && !isWatched(port.edit)) port.edit=null;
+    // 自動更新重畫時，保留正在輸入的警示價位與游標位置（只限同一檔；換開別檔的鈴鐺時不能把上一檔的價位帶過去）
+    var keep=null, upEl=$("alUp"), dnEl=$("alDn"), act=document.activeElement, typing=(act===upEl || act===dnEl);
+    if(port.edit && upEl && dnEl && upEl.getAttribute("data-code")===port.edit)
+      keep={ up:upEl.value, dn:dnEl.value, focus:typing ? act.id : "",
+             ss:typing ? act.selectionStart : null, se:typing ? act.selectionEnd : null };
+    if(!list.length){
+      el.innerHTML='<div class="port-empty">還沒有自選股：在下方輸入代號加入，或到「個股分析」按星號。</div>';
+      return;
+    }
+    var html='<div class="rank-list">';
+    list.forEach(function(it){
+      var c=it.c, q=port.quotes[c], a=al[c], hit=!!hitSet[c], nm=it.n || (q && q.name) || c, px;
+      if(!q){
+        px='<span class="rank-px flat">'+noQuoteTxt(c)+'</span>';
+      } else if(q.close==null){
+        px='<span class="rank-px flat"><span class="pre">昨收</span>'+fmt(q.prevClose,2)+'<span class="pc">'+noTradeTxt()+'</span></span>';
+      } else {
+        var cc=cls(q.change==null ? 0 : q.change);
+        // approx：最近 5 秒沒成交，暫以最佳買／賣價顯示
+        px='<span class="rank-px '+cc+'"'+(q.approx ? ' title="最近幾秒沒有成交，暫以最佳買價（或賣價）顯示"' : '')+'>'
+          +(q.approx ? '<span class="pre">約</span>' : '')+fmt(q.close,2)+'<span class="pc">'
+          +(q.change==null ? "—" : signed(q.change,2))+(q.changePct==null ? "" : "（"+signed(q.changePct,2)+"%）")+'</span></span>';
+      }
+      var at=alertTxt(a);
+      html += '<div class="rank-row pq-row'+(hit ? " hit" : "")+'" data-code="'+escAttr(c)+'">'
+        + '<span class="rank-name">'+esc(nm)+'<span class="rc">'+esc(c)+'</span>'
+        + (at ? '<span class="pq-sub'+(hit ? " hit" : "")+'">'+(hit ? "已到價・" : "")+esc(at)+'</span>' : "")+'</span>'
+        + px
+        + '<button class="icon-btn'+(a ? " bell-on" : "")+'" data-bell="'+escAttr(c)+'" title="設定價格警示" aria-label="設定 '+escAttr(c)+' 價格警示">'+BELL+'</button>'
+        + '</div>';
+      if(port.edit===c) html += alertEditor(c, a);
+    });
+    el.innerHTML = html+'</div>';
+    if(keep && $("alUp")){
+      $("alUp").value=keep.up; $("alDn").value=keep.dn;
+      if(keep.focus){
+        var f=$(keep.focus); f.focus();
+        try{ if(keep.ss!=null) f.setSelectionRange(keep.ss, keep.se); }catch(e){}
+      }
+    }
+  }
+
+  function renderPortStatus(){
+    var auto=portAutoOn(), st=$("portStatus"), s="";
+    $("portAuto").textContent = "自動更新："+(auto ? "開" : "關");
+    $("portAuto").classList.toggle("on", auto);
+    $("portRefresh").disabled = port.loading;
+    var nu=Object.keys(port.unavail).length, qd=quoteDate();
+    if(port.loading) s="更新中…";
+    else if(port.err) s=port.err;
+    else if(port.at){
+      s=hhmm(port.asOf || new Date(port.at).toISOString())+" 更新"+(qd && qd!==twToday() ? "（報價為 "+mmdd(qd)+" 收盤）" : "");
+      if(nu) s+=" · 有 "+nu+" 檔暫時無法取得最新報價，請稍後再按重新整理";
+    }
+    if(auto && !port.loading && !port.err) s += (s ? " · " : "")+(isTradingTime() ? "盤中每 60 秒自動更新" : "非交易時間，暫停自動更新");
+    st.textContent=s;
+    st.className="port-status"+((port.err || nu) && !port.loading ? " warn" : "");
+  }
+
+  function renderPortBanner(){
+    var h=port.hits;
+    $("portBanner").innerHTML = h.length
+      ? '<div class="al-banner"><b>價格警示：'+h.length+' 筆已到價</b><ul>'
+        + h.map(function(x){ return '<li>'+esc(x.text)+'</li>'; }).join("")+'</ul></div>'
+      : "";
+  }
+
+  function renderPort(){
+    port.hits = alertHits();
+    renderPortStatus();
+    renderPortBanner();
+    renderPortWatch();
+    renderPortHold();
+    renderNotifyBtn();
+  }
+
+  // 自動更新：只在「自選持股」分頁、頁面看得到、而且是盤中時才打 API
+  function portTick(){
+    if(mode!=="port" || document.hidden || !isTradingTime()){ renderPortStatus(); return; }
+    refreshQuotes();
+  }
+  function portTimerSync(){
+    var want = mode==="port" && portAutoOn();
+    if(want && !port.timer) port.timer=setInterval(portTick, 60000);
+    if(!want && port.timer){ clearInterval(port.timer); port.timer=null; }
+  }
+  function portEnter(){
+    renderPort();
+    // 在別的分頁新加的自選股／持股還沒有報價時，就算剛更新過也要再抓
+    var need=portCodes().some(function(c){ return !port.quotes[c] && !port.missing[c]; });
+    if(need || !port.at || Date.now()-port.at>30000) refreshQuotes();
+  }
+  document.addEventListener("visibilitychange", function(){
+    if(!document.hidden && mode==="port" && portAutoOn() && isTradingTime() && Date.now()-port.at>60000) refreshQuotes();
+  });
+
+  function openStock(code){
+    setMode("stock");
+    qEl.value=code; hintEl.classList.remove("show");
+    openWhenFree(code);
+  }
+
+  $("portRefresh").addEventListener("click", refreshQuotes);
+  $("portAuto").addEventListener("click", function(){
+    lsSet("skyline_port_auto", portAutoOn() ? "0" : "1");
+    portTimerSync(); renderPortStatus();
+  });
+  $("portNotify").addEventListener("click", toggleNotify);
+  $("portWatch").addEventListener("click", function(e){
+    var bell=e.target.closest("[data-bell]"), act=e.target.closest("[data-act]");
+    if(bell){
+      var bc=bell.getAttribute("data-bell");
+      port.edit = (port.edit===bc) ? null : bc;
+      renderPortWatch();
+      var f=$("alUp"); if(f && window.matchMedia && window.matchMedia("(pointer: fine)").matches) f.focus();
+      return;
+    }
+    if(act){
+      var k=act.getAttribute("data-act"), c=port.edit, al;
+      if(k==="al-save") saveAlertEdit();
+      else if(k==="al-clear"){ al=loadAlerts(); delete al[c]; saveAlerts(al); port.edit=null; renderPort(); }
+      else if(k==="unwatch" && c){
+        al=loadAlerts(); delete al[c]; saveAlerts(al);
+        port.edit=null; removeWatch(c);   // removeWatch 會同步個股分析的自選股籤與本分頁
+      }
+      return;
+    }
+    if(e.target.closest(".pq-edit")) return;
+    var r=e.target.closest(".pq-row"); if(!r) return;
+    openStock(r.getAttribute("data-code"));
+  });
+  $("portWatch").addEventListener("keydown", function(e){
+    if(e.key==="Enter" && (e.target.id==="alUp" || e.target.id==="alDn")){ e.preventDefault(); saveAlertEdit(); }
+  });
+  function portWatchAdd(){
+    var inp=$("portWatchAdd"), msg=$("portWatchMsg");
+    var m=inp.value.trim().match(/^(\d{4,6}[A-Za-z]?)(?:\s+(.+))?$/);
+    function say(t, warn){ msg.className="cmd-hint"+(warn ? " warn" : ""); msg.textContent=t; }
+    if(!m){ say("請輸入股票代號，例如 2330，或「2330 台積電」。", true); inp.focus(); return; }
+    var c=m[1].toUpperCase();
+    if(isWatched(c)){ say(c+" 已經在自選股裡了。", true); return; }
+    if(loadWatch().length>=20){ say("自選股最多 20 檔，請先移除不需要的（按鈴鐺 →「移出自選」）。", true); return; }
+    addWatch(c, (m[2]||"").trim() || nameOf(c));
+    inp.value="";
+    say("已加入 "+c+"。");
+    refreshQuotes();
+  }
+  $("portWatchAddBtn").addEventListener("click", portWatchAdd);
+  $("portWatchAdd").addEventListener("keydown", function(e){ if(e.key==="Enter"){ e.preventDefault(); portWatchAdd(); } });
+  $("hAdd").addEventListener("click", holdAdd);
+  ["hCode","hShares","hCost"].forEach(function(id){
+    $(id).addEventListener("keydown", function(e){ if(e.key==="Enter"){ e.preventDefault(); holdAdd(); } });
+  });
+  $("portHold").addEventListener("click", function(e){
+    var ed=e.target.closest("[data-hedit]"), del=e.target.closest("[data-hdel]"), list=loadHold(), i;
+    if(ed){
+      var c=ed.getAttribute("data-hedit");
+      for(i=0;i<list.length;i++) if(list[i].code===c){
+        $("hCode").value=list[i].code; $("hShares").value=list[i].shares; $("hCost").value=list[i].cost;
+        $("hMsg").className="cmd-hint"; $("hMsg").textContent="改好股數或成本後按「加入／更新」，會覆蓋原本的紀錄。";
+        $("hShares").focus();
+      }
+      return;
+    }
+    if(del){
+      var d=del.getAttribute("data-hdel"), it=null;
+      for(i=0;i<list.length;i++) if(list[i].code===d) it=list[i];
+      if(!it || !window.confirm("刪除「"+(it.name ? it.name+" " : "")+d+"」的持股紀錄？")) return;
+      saveHold(list.filter(function(x){ return x.code!==d; }));
+      renderPort();
+    }
   });
 
   // ---------- 初始化 ----------
