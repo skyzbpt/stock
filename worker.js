@@ -2,7 +2,9 @@
  * 台股天際線 · 後端 Worker (Cloudflare Workers)
  * ------------------------------------------------------------------
  * 路由：
- *   GET  /api/stock?code=2330   → 行情＋估值＋三大法人＋近四個月日 K（開高低收量）＋技術指標（秒讀；上市、上櫃皆可）
+ *   GET  /                      → 網頁本體（index.html 一起打包進 Worker，打開 Worker 網址就是完整網頁）
+ *   GET  /api                   → API 路由清單
+ *   GET  /api/stock?code=2330  → 行情＋估值＋三大法人＋近四個月日 K（開高低收量）＋技術指標（秒讀；上市、上櫃皆可）
  *   GET  /api/extra?code=2330   → 基本面與籌碼：月營收、季 EPS、股利、融資融券、外資持股、重大訊息、大盤
  *   GET  /api/quotes?codes=2330,6488,0050 → 多檔即時報價（自選股、持股損益用；一次最多 30 檔，上市上櫃可混查）
  *   GET  /api/screen            → 全市場掃描（市場雷達五份榜單，目前只含上市）
@@ -32,7 +34,10 @@
  *   - 建議把下方 ALLOW_ORIGIN 改成你的網域，例如 "https://skyzbpt.github.io"
  */
 
-const ANTHROPIC_MODEL   = "claude-sonnet-4-6";        // 想更快、更省成本可改 "claude-haiku-4-5-20251001"
+// 網頁本體：wrangler 預設把 .html 當文字模組打包，Worker 網址打開就是網頁（GitHub Pages 版照常可用）
+import INDEX_HTML from "./index.html";
+
+const ANTHROPIC_MODEL   = "claude-sonnet-4-6";       // 想更快、更省成本可改 "claude-haiku-4-5-20251001"
 const ANTHROPIC_VERSION = "2023-06-01";
 const ANALYSIS_MAX_TOKENS = 1600;
 const UA = "Mozilla/5.0 (compatible; TaiguSkyline/1.0; +https://github.com/)";
@@ -1714,7 +1719,12 @@ export default {
         return json(await newsDigest(env, body));
       }
 
-      if (url.pathname === "/" || url.pathname === "/api") {
+      if (url.pathname === "/" || url.pathname === "/index.html") {
+        return new Response(INDEX_HTML, {
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" }
+        });
+      }
+      if (url.pathname === "/api") {
         return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/quotes?codes=2330,6488,0050", "GET /api/screen", "GET /api/debug[?code=2330&otc=6488 | ?ds=t86&code=2330]", "POST /api/analyze", "POST /api/news", "POST /api/command"] });
       }
       return json({ error: "Not found" }, 404);

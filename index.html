@@ -575,7 +575,8 @@
   "use strict";
 
   // ====== 可直接把你的 Worker 網址寫死在這裡（免每次貼）======
-  var DEFAULT_WORKER = "https://stock.skyzbpt.workers.dev";   // 裝置上另存的網址會優先使用
+  // 網頁由 Worker 本身提供（打開 *.workers.dev）時，直接用同一個網址當後端
+  var DEFAULT_WORKER = /\.workers\.dev$/.test(location.hostname) ? location.origin : "https://stock.skyzbpt.workers.dev";   // 裝置上另存的網址會優先使用
 
   var SCEN = {
     overview:{label:"綜合研判"}, technical:{label:"技術面"}, chips:{label:"法人籌碼"},
