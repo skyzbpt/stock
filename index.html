@@ -104,6 +104,7 @@
   .mode-tab{flex:1;font-family:var(--font-disp);font-size:14px;font-weight:600;color:var(--muted);background:transparent;
     border:none;border-radius:9px;padding:9px 10px;cursor:pointer;transition:all .15s;}
   .mode-tab.active{background:var(--white);color:var(--sky-deep);box-shadow:0 1px 3px rgba(15,42,67,.08);}
+  .mode-tab .ls{display:none;}
 
   /* ---------- 市場雷達 ---------- */
   .rank-list{border:1px solid var(--line-soft);border-radius:12px;overflow:hidden;}
@@ -206,7 +207,8 @@
   .sig.bear{color:#047857;background:#ECFDF5;border-color:#A7F3D0;}
   .tc-grid{grid-template-columns:repeat(4,1fr);}
   .sum-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:0;}
-  .sum-grid .v{overflow-wrap:anywhere;}   /* 金額很大時換行，不要把格子撐出卡片 */
+  .sum-grid .v{overflow-wrap:anywhere;}
+  .sim-sum{grid-template-columns:repeat(3,minmax(0,1fr));}   /* 金額很大時換行，不要把格子撐出卡片 */
   .tc-grid .s{line-height:1.55;}
   .tc-disc{font-size:12px;color:var(--faint);margin-top:10px;}
 
@@ -254,6 +256,35 @@
   .pt .act .link-btn{color:var(--sky-deep);font-weight:600;}
   .pt .act .link-btn.del{color:var(--faint);}
   .pt .act .link-btn.del:hover{color:#B42318;}
+
+  /* ---------- 模擬交易 ---------- */
+  .sim-form{display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid var(--line-soft);border-radius:12px;background:var(--white);}
+  .sim-form > .cfg-input{flex:0 0 auto;}   /* 直向排列時不要被 flex-basis 撐高 */
+  .sim-form > .seg{align-self:flex-start;}
+  .sim-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .sim-set .cfg-input{flex:1 1 150px;}
+  .sim-row .cfg-input{flex:1 1 120px;}
+  .sim-form select.cfg-input,.hold-form select.cfg-input{cursor:pointer;}
+  .cfg-input:disabled{opacity:.6;cursor:not-allowed;}
+  .seg{display:inline-flex;background:var(--mist);border:1px solid var(--line);border-radius:10px;padding:3px;gap:3px;flex:0 0 auto;}
+  .seg button{font-family:var(--font-disp);font-size:13.5px;font-weight:600;color:var(--muted);background:transparent;border:none;
+    border-radius:8px;padding:7px 16px;cursor:pointer;}
+  .seg button.on{background:var(--white);color:var(--sky-deep);box-shadow:0 1px 3px rgba(15,42,67,.08);}
+  #simSide button.on[data-side="buy"]{background:var(--up);color:#fff;}
+  #simSide button.on[data-side="sell"]{background:var(--down);color:#fff;}
+  .sim-quote{font-size:13px;color:var(--muted);line-height:1.6;min-height:1.6em;}
+  .sim-quote b{color:var(--ink);font-family:var(--font-disp);}
+  .sim-preview{font-size:13px;color:var(--muted);background:var(--mist);border-radius:10px;padding:10px 12px;line-height:1.8;font-variant-numeric:tabular-nums;}
+  .sim-preview:empty{display:none;}
+  .sim-preview .tot{color:var(--ink);font-weight:700;}
+  .sim-submit{width:100%;text-align:center;}
+  .sim-submit.buy{background:var(--up);border-color:var(--up);}
+  .sim-submit.sell{background:var(--down);border-color:var(--down);}
+  .sim-submit:hover:not(:disabled){filter:brightness(.92);}
+  .sim-submit:disabled{opacity:.6;cursor:not-allowed;}
+  .tag-side{display:inline-block;font-size:11px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:5px;color:#fff;vertical-align:1px;}
+  .tag-side.buy{background:var(--up);} .tag-side.sell{background:var(--down);}
+  .pt .st{font-family:var(--font-body);font-weight:500;font-size:12px;color:var(--faint);}
 
   /* ---------- 研究指令（/api/command）---------- */
   .cmd-group{margin-bottom:14px;}
@@ -354,9 +385,16 @@
     .price-big{font-size:32px;}
     .btn-primary{width:100%;text-align:center;}
     .horizon{height:52px;}
-    .mode-tabs{gap:4px;}
-    .mode-tab{font-size:13px;padding:8px 4px;white-space:nowrap;}
+    /* 五個分頁：窄螢幕字小一點；萬一還放不下就在分頁列裡左右滑，不撐開整頁 */
+    .mode-tabs{gap:2px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+    .mode-tabs::-webkit-scrollbar{display:none;}
+    .mode-tab{flex:1 0 auto;font-size:12px;padding:8px 3px;white-space:nowrap;}
     .stat{padding:18px 16px;}
+  }
+  @media (max-width:360px){
+    .mode-tab .lf{display:none;}
+    .mode-tab .ls{display:inline;}
+    .mode-tab{font-size:13px;}
   }
   @media (prefers-reduced-motion:reduce){
     .fade{animation:none;}
@@ -409,10 +447,11 @@
 
   <section class="panel">
     <div class="mode-tabs" id="modeTabs">
-      <button class="mode-tab active" data-mode="stock">個股分析</button>
-      <button class="mode-tab" data-mode="radar">市場雷達</button>
-      <button class="mode-tab" data-mode="cmd">研究指令</button>
-      <button class="mode-tab" data-mode="port">自選持股</button>
+      <button class="mode-tab active" data-mode="stock"><span class="lf">個股分析</span><span class="ls">個股</span></button>
+      <button class="mode-tab" data-mode="radar"><span class="lf">市場雷達</span><span class="ls">雷達</span></button>
+      <button class="mode-tab" data-mode="cmd"><span class="lf">研究指令</span><span class="ls">指令</span></button>
+      <button class="mode-tab" data-mode="port"><span class="lf">自選持股</span><span class="ls">持股</span></button>
+      <button class="mode-tab" data-mode="sim"><span class="lf">模擬交易</span><span class="ls">模擬</span></button>
     </div>
 
     <div id="modeStock">
@@ -503,6 +542,75 @@
         </div>
         <div class="cmd-hint" id="hMsg">同一檔再加入一次，會用新的股數與成本覆蓋原本的紀錄。</div>
         <div class="port-note">怎麼算：市值＝現價×股數；未實現損益＝市值－買進成本－預估賣出費用。賣出費用以手續費 0.1425%（最低 20 元，未計券商折扣）加證交稅估算，一般股票 0.3%、代號 00 開頭的 ETF 0.1%，債券 ETF（代號結尾是 B，例如 00679B）目前免證交稅。買進手續費請自行併入每股成本；還沒有成交價時以昨收價估算。數字僅供參考，實際以券商對帳單為準。</div>
+      </div>
+    </div>
+
+    <div id="modeSim" style="display:none;">
+      <p class="panel-lead">用<b>虛擬資金</b>練習買賣台股：依即時報價模擬成交，手續費、證交稅照實扣。<b>不會真的下單</b>，紀錄只存在這台裝置。</p>
+      <div class="port-tools">
+        <button class="btn-sm primary" id="simRefresh">更新報價</button>
+        <button class="btn-sm ghost" id="simAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 60 秒更新報價並撮合委託">自動更新：關</button>
+        <span class="port-status" id="simStatus"></span>
+      </div>
+      <div id="simSum"></div>
+
+      <div class="port-sec">
+        <p class="field-label">下單</p>
+        <div class="sim-form">
+          <div class="seg" id="simSide" role="group" aria-label="買賣別">
+            <button type="button" data-side="buy" class="on">買進</button>
+            <button type="button" data-side="sell">賣出</button>
+          </div>
+          <input id="simCode" class="cfg-input" type="text" inputmode="numeric" placeholder="股票代號，例如 2330" autocomplete="off" aria-label="下單代號" />
+          <div class="sim-quote" id="simQuote"></div>
+          <div class="sim-row">
+            <input id="simQty" class="cfg-input" type="text" inputmode="numeric" placeholder="數量（1 張＝1000 股）" autocomplete="off" aria-label="數量" />
+            <select id="simUnit" class="cfg-input" aria-label="單位">
+              <option value="lot">張</option>
+              <option value="share">零股（股）</option>
+            </select>
+          </div>
+          <div class="sim-row">
+            <div class="seg" id="simType" role="group" aria-label="價格類型">
+              <button type="button" data-type="mkt" class="on">市價</button>
+              <button type="button" data-type="lmt">限價</button>
+            </div>
+            <input id="simPx" class="cfg-input" type="text" inputmode="decimal" placeholder="市價：以成交當下價格" autocomplete="off" aria-label="限價" disabled />
+          </div>
+          <div class="sim-preview" id="simPreview"></div>
+          <button class="btn btn-primary sim-submit buy" id="simSubmit">送出買進委託</button>
+          <div class="cmd-hint" id="simMsg"></div>
+        </div>
+      </div>
+
+      <div class="port-sec">
+        <p class="field-label">委託中</p>
+        <div id="simOpen"></div>
+      </div>
+
+      <div class="port-sec">
+        <p class="field-label">模擬持股</p>
+        <div id="simPos"></div>
+      </div>
+
+      <div class="port-sec">
+        <p class="field-label">成交紀錄</p>
+        <div id="simHist"></div>
+      </div>
+
+      <div class="port-sec">
+        <p class="field-label">帳戶設定</p>
+        <div class="hold-form sim-set">
+          <input id="simInit" class="cfg-input" type="text" inputmode="numeric" placeholder="起始資金（元）" autocomplete="off" aria-label="起始資金" />
+          <select id="simDisc" class="cfg-input" aria-label="手續費折扣">
+            <option value="1">手續費原價</option>
+            <option value="0.6">手續費 6 折</option>
+            <option value="0.28">手續費 2.8 折</option>
+          </select>
+          <button class="btn-sm ghost" id="simReset">重設帳戶</button>
+        </div>
+        <div class="cmd-hint" id="simSetMsg">重設帳戶會清空模擬持股、委託與成交紀錄，並以填入的起始資金重新開始。</div>
+        <div class="port-note">撮合規則：盤中（週一至週五 09:00–13:35）以即時成交價模擬成交；非交易時間以最近收盤價成交，方便隨時練習。市價單立即成交；限價單在價格到了才成交（買進：現價小於或等於限價；賣出：現價大於或等於限價），成交價取當時現價，會一直有效到成交或取消。限價要符合台股升降單位，並在漲跌停（昨收 ±10%）範圍內。費用：手續費 0.1425%（可選券商折扣，最低 20 元），賣出另扣證交稅：一般股票 0.3%、ETF 0.1%、債券 ETF 免稅。沒有融資融券、當沖與漲跌停排隊等真實市場細節，結果僅供練習。</div>
       </div>
     </div>
   </section>
@@ -1007,6 +1115,9 @@
       + '<button class="icon-btn'+(isWatched(snap.code)?" star-on":"")+'" id="starBtn" title="加入自選股" aria-label="加入自選股">'
       + '<svg viewBox="0 0 24 24" fill="'+(isWatched(snap.code)?"currentColor":"none")+'" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>'
       + '</button>'
+      + '<button class="icon-btn" id="simBtn" title="模擬下單" aria-label="模擬下單">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"/><path d="M3 8l4-4 4 4"/><path d="M17 20V4"/><path d="M13 16l4 4 4-4"/></svg>'
+      + '</button>'
       + '<button class="icon-btn" id="refreshBtn" title="重新讀取數據" aria-label="重新讀取數據">'
       + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>'
       + '</button></div></div>'
@@ -1019,6 +1130,8 @@
     if(rb) rb.addEventListener("click", function(){ if(state.code && !busy) runFull(state.code, true); });
     var sb = $("starBtn");
     if(sb) sb.addEventListener("click", function(){ toggleWatch(snap.code, snap.name); });
+    var mb = $("simBtn");
+    if(mb) mb.addEventListener("click", function(){ simOpenFor(snap.code); });
   }
   // 星號狀態跟著自選股清單走（在「自選持股」分頁移除時，回來也要正確）
   function syncStar(){
@@ -1287,13 +1400,16 @@
     $("modeRadar").style.display = (m==="radar") ? "block" : "none";
     $("modeCmd").style.display = (m==="cmd") ? "block" : "none";
     $("modePort").style.display = (m==="port") ? "block" : "none";
+    $("modeSim").style.display = (m==="sim") ? "block" : "none";
     $("cmdResultWrap").style.display = (m==="cmd" && cmd.shown) ? "block" : "none";
     resultEl.style.display = (m==="stock") ? "" : "none";
     $("newsWrap").style.display = (m==="stock" && newsOpen) ? "block" : "none";
     hideErr();
     if(m==="cmd") cmdEnter();
     if(m==="port") portEnter();
+    if(m==="sim") simEnter();
     portTimerSync();
+    simTimerSync();
     var tabs = document.querySelectorAll("#modeTabs .mode-tab");
     for(var i=0;i<tabs.length;i++) tabs[i].classList.toggle("active", tabs[i].getAttribute("data-mode")===m);
   }
@@ -1818,33 +1934,39 @@
     return out;
   }
 
+  // 多檔即時報價：後端每次最多 30 檔，超過就分批；單批失敗不拖累其他批（那幾檔列入 unavailable），全部失敗才算失敗
+  function fetchQuoteMap(codes){
+    var base=getBase(), chunks=[];
+    for(var i=0;i<codes.length;i+=QUOTE_CHUNK) chunks.push(codes.slice(i,i+QUOTE_CHUNK));
+    return Promise.all(chunks.map(function(ch){
+      return getJSON(base+"/api/quotes?codes="+ch.join(",")).catch(function(err){ return { unavailable:ch, err:err }; });
+    })).then(function(rs){
+      if(rs.every(function(r){ return r.err; })) throw rs[0].err;
+      var out={ quotes:{}, missing:{}, unavailable:{}, asOf:null };
+      rs.forEach(function(r){
+        var qs=r.quotes || {};
+        for(var k in qs) if(qs[k]) out.quotes[k]=qs[k];
+        (r.missing || []).forEach(function(c){ out.missing[c]=1; });
+        (r.unavailable || []).forEach(function(c){ out.unavailable[c]=1; });
+        if(r.asOf) out.asOf=r.asOf;
+      });
+      return out;
+    });
+  }
+
   function refreshQuotes(){
     if(port.loading){ port.again=true; return; }
     var codes=portCodes();
     if(!codes.length){ renderPort(); return; }
-    var base=getBase();
-    if(!base){ port.err="請先在上方「後端設定」貼上你的 Worker 網址。"; renderPort(); return; }
+    if(!getBase()){ port.err="請先在上方「後端設定」貼上你的 Worker 網址。"; renderPort(); return; }
     port.loading=true; renderPortStatus();
-    var chunks=[];
-    for(var i=0;i<codes.length;i+=QUOTE_CHUNK) chunks.push(codes.slice(i,i+QUOTE_CHUNK));
-    // 單批失敗不拖累其他批：那幾檔當作暫時拿不到，全部失敗才顯示錯誤
-    Promise.all(chunks.map(function(ch){
-      return getJSON(base+"/api/quotes?codes="+ch.join(",")).catch(function(err){ return { unavailable:ch, err:err }; });
-    }))
-      .then(function(rs){
-        if(rs.every(function(r){ return r.err; })) throw rs[0].err;
-        var q={}, miss={}, un={};
-        rs.forEach(function(r){
-          var qs=r.quotes || {};
-          for(var k in qs) if(qs[k]) q[k]=qs[k];
-          (r.missing || []).forEach(function(c){ miss[c]=1; });
-          if(r.asOf) port.asOf=r.asOf;
-        });
+    fetchQuoteMap(codes)
+      .then(function(r){
+        var q=r.quotes;
         // 暫時拿不到的先沿用上一次的報價（狀態列會提醒）
-        rs.forEach(function(r){
-          (r.unavailable || []).forEach(function(c){ un[c]=1; if(!q[c] && port.quotes[c]) q[c]=port.quotes[c]; });
-        });
-        port.quotes=q; port.missing=miss; port.unavail=un; port.at=Date.now(); port.err=""; port.loading=false;
+        for(var c in r.unavailable) if(!q[c] && port.quotes[c]) q[c]=port.quotes[c];
+        if(r.asOf) port.asOf=r.asOf;
+        port.quotes=q; port.missing=r.missing; port.unavail=r.unavailable; port.at=Date.now(); port.err=""; port.loading=false;
         fillNames(q);
         renderPort();
         fireAlerts(port.hits);
@@ -1900,9 +2022,14 @@
   // iPhone Safari 沒有 Notification，只顯示頁面上的提醒
   function fireAlerts(hits){
     if(!hits.length || !notifyOn()) return;
-    var fired=loadJSON("skyline_alert_fired", {}), cut=new Date(Date.now()-7*86400000).toISOString().slice(0,10), k;
+    var fired=loadJSON("skyline_alert_fired", {}), k;
     if(!fired || typeof fired!=="object") fired={};
-    for(k in fired) if(!(fired[k]>=cut)) delete fired[k];   // 一週前的紀錄清掉，免得越存越多
+    // 比這次報價日期早一週以上的紀錄清掉，免得越存越多；以報價日期而不是今天往前算，
+    // 春節這類超過一週的長假時，最後一個交易日的紀錄才不會被清掉、害同一個警示每次更新都再通知
+    var latest=hits.reduce(function(m, h){ return h.day>m ? h.day : m; }, "");
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(latest)) latest=twToday();
+    var cut=new Date(Date.parse(latest+"T00:00:00Z")-7*86400000).toISOString().slice(0,10);
+    for(k in fired) if(!(fired[k]>=cut)) delete fired[k];
     for(var i=0;i<hits.length;i++){
       var h=hits[i], key=h.code+"_"+h.dir;
       if(fired[key]===h.day) continue;
@@ -2236,6 +2363,435 @@
       saveHold(list.filter(function(x){ return x.code!==d; }));
       renderPort();
     }
+  });
+
+  // ---------- 模擬交易：虛擬資金，依即時報價撮合（紀錄只存在這台裝置，不會真的下單）----------
+  // 金額一律以「分」的整數保存，避免小數誤差越滾越大；畫面顯示時再除以 100
+  var SIM_KEY="skyline_sim", SIM_INIT=1000000, SIM_KEEP=300, SIM_SHOW=50;
+  var sim = { quotes:{}, missing:{}, at:0, loading:false, again:false, err:"", note:"", timer:null, side:"buy", type:"mkt", qt:null };
+
+  function simNew(init, disc){ return { v:1, init:init, disc:disc || 1, cash:init*100, realized:0, pos:{}, orders:[], since:new Date().toISOString() }; }
+  function simLoad(){
+    var s=loadJSON(SIM_KEY, null);
+    if(!s || typeof s!=="object" || s.v!==1 || !isFinite(s.cash) || !isFinite(s.init) || !s.pos || typeof s.pos!=="object" || Array.isArray(s.pos) || !Array.isArray(s.orders))
+      return simNew(SIM_INIT, 1);
+    if(!isFinite(s.realized)) s.realized=0;
+    if(!(s.disc>0 && s.disc<=1)) s.disc=1;
+    return s;
+  }
+  function simSave(s){
+    // 紀錄只留最近 SIM_KEEP 筆，委託中的單一定保留
+    if(s.orders.length>SIM_KEEP){
+      var open=s.orders.filter(function(o){ return o.st==="open"; }), done=s.orders.filter(function(o){ return o.st!=="open"; });
+      s.orders=done.slice(-Math.max(0, SIM_KEEP-open.length)).concat(open)
+        .sort(function(a,b){ return a.t<b.t ? -1 : (a.t>b.t ? 1 : 0); });
+    }
+    lsSet(SIM_KEY, JSON.stringify(s));
+  }
+  function money(cents, signedOut){ var v=Math.round(cents)/100; return signedOut ? signed(v) : fmt(v); }
+
+  // 手續費：成交金額 × 0.1425% × 折扣，取整數元、最低 20 元；證交稅只在賣出時收（股票 0.3%、ETF 0.1%、債券 ETF 免稅）
+  function simFee(s, amt){ return Math.max(20, Math.round(amt*1425*(s.disc || 1)/1e8))*100; }
+  function simTax(code, amt){ return Math.round(amt*taxPermille(code)/1e5)*100; }
+
+  // 台股升降單位：股票 <10 元 0.01、<50 元 0.05、<100 元 0.1、<500 元 0.5、<1000 元 1、以上 5；ETF <50 元 0.01、以上 0.05
+  function tickOf(px, code){
+    if(/^00/.test(code)) return px<50 ? 0.01 : 0.05;
+    return px<10 ? 0.01 : px<50 ? 0.05 : px<100 ? 0.1 : px<500 ? 0.5 : px<1000 ? 1 : 5;
+  }
+  function onTick(px, code){ var k=px/tickOf(px, code); return Math.abs(k-Math.round(k))<1e-6; }
+  // 漲跌停：昨收 ±10%，漲停往下、跌停往上取到合法價位
+  function limitBand(prev, code){
+    if(!(prev>0)) return null;
+    var up=prev*1.1, dn=prev*0.9, tu=tickOf(up, code), td=tickOf(dn, code);
+    return { up:+(Math.floor(up/tu+1e-9)*tu).toFixed(2), dn:+(Math.ceil(dn/td-1e-9)*td).toFixed(2) };
+  }
+  // 撮合用的價格：有成交價就用；非交易時間還沒有成交價（例如開盤前）用昨收；盤中還沒人成交就先不撮合
+  function simPrice(q){
+    if(!q) return null;
+    if(q.close!=null) return q.close;
+    return (!isTradingTime() && q.prevClose!=null) ? q.prevClose : null;
+  }
+  // 估市值用的價格（沒有成交價時用昨收）
+  function simMark(q){ return !q ? null : (q.close!=null ? q.close : (q.prevClose!=null ? q.prevClose : null)); }
+
+  // 委託中的單先保留資金／股數：買單保留「限價×股數＋手續費」，賣單保留股數
+  function simReserved(s, except){
+    var cash=0, sh={};
+    s.orders.forEach(function(o){
+      if(o.st!=="open" || o===except) return;
+      if(o.side==="buy"){ var amt=Math.round(o.lmt*100)*o.sh; cash+=amt+simFee(s, amt); }
+      else sh[o.code]=(sh[o.code] || 0)+o.sh;
+    });
+    return { cash:cash, sh:sh };
+  }
+
+  // 成交一筆：更新現金、持股（成本含買進手續費）與已實現損益；資金或股數不夠就改成「未成交」
+  function simFill(s, o, px, q){
+    var amt=Math.round(px*100)*o.sh, fee=simFee(s, amt), res=simReserved(s, o), p=s.pos[o.code];
+    if(o.side==="buy"){
+      if(s.cash-res.cash < amt+fee){ o.st="rejected"; o.why="可用現金不足"; o.ft=new Date().toISOString(); return false; }
+      s.cash-=amt+fee;
+      if(!p) p=s.pos[o.code]={ name:o.name || "", sh:0, cost:0 };
+      p.sh+=o.sh; p.cost+=amt+fee;
+      if(!p.name && o.name) p.name=o.name;
+    } else {
+      if(!p || p.sh-(res.sh[o.code] || 0) < o.sh){ o.st="rejected"; o.why="持股不足"; o.ft=new Date().toISOString(); return false; }
+      var tax=simTax(o.code, amt), part=Math.round(p.cost*o.sh/p.sh);
+      o.tax=tax; o.pnl=amt-fee-tax-part;
+      s.cash+=amt-fee-tax; s.realized+=o.pnl;
+      p.cost-=part; p.sh-=o.sh;
+      if(p.sh<=0) delete s.pos[o.code];
+    }
+    o.st="filled"; o.px=px; o.amt=amt; o.fee=fee; o.ft=new Date().toISOString();
+    var stale = !isTradingTime() || (q && q.date && q.date!==twToday());
+    o.note = !stale ? "" : (q && q.close!=null ? "非交易時間，以"+(q.date ? " "+mmdd(q.date)+" " : "最近")+"收盤價成交" : "非交易時間，以昨收價成交");
+    return true;
+  }
+  // 用最新報價撮合委託中的限價單：買進＝現價 ≤ 限價、賣出＝現價 ≥ 限價，成交價取當時現價；回傳成交（或被拒）的筆數
+  function simMatch(s){
+    var n=0;
+    s.orders.forEach(function(o){
+      if(o.st!=="open") return;
+      var q=sim.quotes[o.code], px=simPrice(q);
+      if(px==null) return;
+      if(o.side==="buy" ? px<=o.lmt+1e-9 : px>=o.lmt-1e-9){ simFill(s, o, px, q); n++; }
+    });
+    return n;
+  }
+
+  // 要報價的代號：持股、委託中的單、下單欄正在填的代號
+  function simCodes(s){
+    var seen={}, out=[], fc=$("simCode").value.trim().toUpperCase();
+    Object.keys(s.pos).concat(s.orders.filter(function(o){ return o.st==="open"; }).map(function(o){ return o.code; }), /^\d{4,6}[A-Z]?$/.test(fc) ? [fc] : [])
+      .forEach(function(c){ if(!seen[c]){ seen[c]=1; out.push(c); } });
+    return out;
+  }
+  function simTakeQuotes(r){
+    var now=Date.now();
+    for(var k in r.quotes){ r.quotes[k]._at=now; sim.quotes[k]=r.quotes[k]; delete sim.missing[k]; }
+    for(var m in r.missing) sim.missing[m]=1;
+  }
+  function simRefresh(){
+    if(sim.loading){ sim.again=true; return; }
+    var s=simLoad(), codes=simCodes(s);
+    if(!codes.length){ sim.err=""; renderSim(); return; }
+    if(!getBase()){ sim.err="請先在上方「後端設定」貼上你的 Worker 網址。"; renderSim(); return; }
+    sim.loading=true; renderSimStatus();
+    fetchQuoteMap(codes)
+      .then(function(r){
+        simTakeQuotes(r);
+        sim.at=Date.now(); sim.err="";
+        var s2=simLoad(), n=simMatch(s2);
+        if(n){ simSave(s2); sim.note="有 "+n+" 筆委託已處理，請看成交紀錄。"; }
+      })
+      .catch(function(err){ sim.err="報價讀取失敗："+err.message; })
+      .then(function(){
+        sim.loading=false; renderSim();
+        if(sim.again){ sim.again=false; simRefresh(); }
+      });
+  }
+  // 單檔報價：15 秒內查過就沿用
+  function simQuote(code){
+    var q=sim.quotes[code];
+    if(q && q._at && Date.now()-q._at<15000) return Promise.resolve(q);
+    if(!getBase()) return Promise.resolve(null);
+    return fetchQuoteMap([code]).then(function(r){ simTakeQuotes(r); return sim.quotes[code] || null; })
+      .catch(function(){ return null; });
+  }
+
+  // ----- 畫面 -----
+  function simCell(k, v, sub){ return '<div class="cell"><div class="k">'+k+'</div><div class="v">'+v+'</div>'+(sub ? '<div class="s">'+sub+'</div>' : '')+'</div>'; }
+  function simPosVal(s, c, p){
+    var px=simMark(sim.quotes[c]);
+    if(px==null) return null;
+    var amt=Math.round(px*100)*p.sh, net=amt-simFee(s, amt)-simTax(c, amt);
+    return { px:px, mv:amt, pnl:net-p.cost };
+  }
+  function renderSimSum(s){
+    var mv=0, unreal=0, miss=0, res=simReserved(s);
+    for(var c in s.pos){
+      var v=simPosVal(s, c, s.pos[c]);
+      if(v){ mv+=v.mv; unreal+=v.pnl; } else { mv+=s.pos[c].cost; miss++; }
+    }
+    var total=s.cash+mv, base=s.init*100, ret=base ? (total-base)/base*100 : 0;
+    $("simSum").innerHTML = '<div class="grid sum-grid sim-sum">'
+      + simCell("總資產", money(total), '報酬率 <span class="'+cls(ret)+'">'+signed(ret,2)+'%</span>')
+      + simCell("可用現金", money(s.cash-res.cash), res.cash ? "另有 "+money(res.cash)+" 保留給委託中的買單" : "")
+      + simCell("持股市值", money(mv), miss ? miss+" 檔暫無報價，以成本估" : "")
+      + simCell("未實現損益", '<span class="'+cls(unreal)+'">'+money(unreal, true)+'</span>', "已扣預估賣出費用")
+      + simCell("已實現損益", '<span class="'+cls(s.realized)+'">'+money(s.realized, true)+'</span>', "")
+      + simCell("起始資金", money(base), "自 "+esc(mdhm(s.since))+" 開始")
+      + '</div>';
+  }
+  function sideTag(side){ return '<span class="tag-side '+side+'">'+(side==="buy" ? "買" : "賣")+'</span>'; }
+  function qtyTxt(sh){ return sh%1000===0 ? fmt(sh/1000)+" 張" : fmt(sh)+" 股"; }
+  function renderSimPos(s){
+    var codes=Object.keys(s.pos), el=$("simPos");
+    if(!codes.length){ el.innerHTML='<div class="port-empty">還沒有模擬持股。在上方輸入代號、數量，按「送出買進委託」試試看。</div>'; return; }
+    var rows="";
+    codes.forEach(function(c){
+      var p=s.pos[c], v=simPosVal(s, c, p), q=sim.quotes[c], nm=p.name || (q && q.name) || "", ce=escAttr(c);
+      var avg=p.cost/100/p.sh;
+      rows += '<tr><td><span class="nm">'+esc(nm || c)+'</span><span class="sub">'+esc(c)+'</span></td>'
+        + (v ? '<td>'+fmt(v.px,2)+'<span class="sub">'+(q && q.close==null ? "昨收" : (q && q.change!=null ? '<span class="'+cls(q.change)+'">'+signed(q.change,2)+'</span>' : "—"))+'</span></td>'
+             + '<td class="'+cls(v.pnl)+'">'+money(v.pnl, true)+'<span class="sub '+cls(v.pnl)+'">'+(p.cost ? signed(v.pnl/p.cost*100,2)+"%" : "—")+'</span></td>'
+             + '<td>'+money(v.mv)+'</td>'
+           : '<td colspan="3" class="flat">'+(sim.missing[c] ? "查無報價" : (sim.loading ? "讀取中…" : "暫無報價"))+'</td>')
+        + '<td>'+fmt(p.sh)+'<span class="sub">'+qtyTxt(p.sh)+'</span></td>'
+        + '<td>'+fmt(avg,2)+'<span class="sub">成本 '+money(p.cost)+'</span></td>'
+        + '<td class="act"><button class="link-btn" data-sell="'+ce+'">賣出</button></td></tr>';
+    });
+    el.innerHTML='<div class="tbl-scroll"><table class="pt"><thead><tr><th>股票</th><th>現價</th><th>未實現損益</th><th>市值</th><th>股數</th><th>均價（含手續費）</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+  function renderSimOpen(s){
+    var list=s.orders.filter(function(o){ return o.st==="open"; }), el=$("simOpen");
+    if(!list.length){ el.innerHTML='<div class="port-empty">目前沒有委託中的單。限價單在價格到之前會留在這裡。</div>'; return; }
+    var rows="";
+    list.slice().reverse().forEach(function(o){
+      var q=sim.quotes[o.code], px=simMark(q);
+      rows += '<tr><td><span class="nm">'+sideTag(o.side)+esc(o.name || o.code)+'</span><span class="sub">'+esc(o.code)+'</span></td>'
+        + '<td>'+fmt(o.lmt,2)+'<span class="sub">限價</span></td>'
+        + '<td>'+(px==null ? "—" : fmt(px,2))+'<span class="sub">現價</span></td>'
+        + '<td>'+qtyTxt(o.sh)+'</td>'
+        + '<td class="st">'+esc(mdhm(o.t))+'</td>'
+        + '<td class="act"><button class="link-btn del" data-cancel="'+escAttr(o.id)+'">取消</button></td></tr>';
+    });
+    el.innerHTML='<div class="tbl-scroll"><table class="pt"><thead><tr><th>股票</th><th>限價</th><th>現價</th><th>數量</th><th>委託時間</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+  function renderSimHist(s){
+    var list=s.orders.filter(function(o){ return o.st!=="open"; }), el=$("simHist");
+    if(!list.length){ el.innerHTML='<div class="port-empty">還沒有成交紀錄。</div>'; return; }
+    var rows="", shown=list.slice(-SIM_SHOW).reverse();
+    shown.forEach(function(o){
+      var st = o.st==="filled" ? "成交"+(o.type==="lmt" ? "（限價）" : "（市價）")
+             : (o.st==="cancelled" ? "已取消" : "未成交："+(o.why || ""));
+      var cost=o.st==="filled" ? (o.fee || 0)+(o.tax || 0) : null;
+      rows += '<tr><td><span class="nm">'+sideTag(o.side)+esc(o.name || o.code)+'</span><span class="sub">'+esc(o.code)+'</span></td>'
+        + '<td>'+qtyTxt(o.sh)+'</td>'
+        + '<td>'+(o.st==="filled" ? fmt(o.px,2) : (o.lmt!=null ? fmt(o.lmt,2)+'<span class="sub">限價</span>' : "—"))+'</td>'
+        + '<td>'+(o.st==="filled" ? money(o.amt) : "—")+'</td>'
+        + '<td>'+(cost==null ? "—" : money(cost)+'<span class="sub">'+(o.tax ? "含稅 "+money(o.tax) : "手續費")+'</span>')+'</td>'
+        + '<td class="'+(o.pnl==null ? "flat" : cls(o.pnl))+'">'+(o.pnl==null ? "—" : money(o.pnl, true))+'</td>'
+        + '<td class="st">'+esc(st)+(o.note ? '<span class="sub">'+esc(o.note)+'</span>' : "")+'</td>'
+        + '<td class="st">'+esc(mdhm(o.ft || o.t))+'</td></tr>';
+    });
+    el.innerHTML='<div class="tbl-scroll"><table class="pt"><thead><tr><th>股票</th><th>數量</th><th>成交價</th><th>成交金額</th><th>費用</th><th>已實現損益</th><th>狀態</th><th>時間</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+      + (list.length>SIM_SHOW ? '<div class="data-date">只顯示最近 '+SIM_SHOW+' 筆（共 '+list.length+' 筆）。</div>' : "");
+  }
+  function renderSimStatus(){
+    var auto=lsGet("skyline_sim_auto")==="1", st=$("simStatus"), t="";
+    $("simAuto").textContent="自動更新："+(auto ? "開" : "關");
+    $("simAuto").classList.toggle("on", auto);
+    $("simRefresh").disabled=sim.loading;
+    if(sim.loading) t="更新中…";
+    else if(sim.err) t=sim.err;
+    else if(sim.at) t=hhmm(new Date(sim.at).toISOString())+" 更新報價"+(isTradingTime() ? "" : " · 非交易時間，以最近收盤價撮合");
+    if(sim.note && !sim.loading) t+=(t ? " · " : "")+sim.note;
+    if(auto && !sim.loading && !sim.err) t+=(t ? " · " : "")+(isTradingTime() ? "盤中每 60 秒自動撮合" : "非交易時間，暫停自動更新");
+    st.textContent=t;
+    st.className="port-status"+(sim.err && !sim.loading ? " warn" : "");
+  }
+
+  // 下單欄：報價、漲跌停、可用資金／可賣股數與費用試算
+  function simFormVals(){
+    var code=$("simCode").value.trim().toUpperCase(), qty=parseNum($("simQty").value), lot=$("simUnit").value==="lot";
+    var sh=(qty!=null && !isNaN(qty) && qty%1===0 && qty>0) ? (lot ? qty*1000 : qty) : null;
+    var lmt=sim.type==="lmt" ? parseNum($("simPx").value) : null;
+    return { code:code, valid:/^\d{4,6}[A-Z]?$/.test(code), sh:sh, lmt:(lmt==null || isNaN(lmt) || lmt<=0) ? null : lmt };
+  }
+  function renderSimForm(){
+    var s=simLoad(), f=simFormVals(), q=f.valid ? sim.quotes[f.code] : null, buy=sim.side==="buy";
+    var sides=$("simSide").querySelectorAll("button"), types=$("simType").querySelectorAll("button"), i;
+    for(i=0;i<sides.length;i++) sides[i].classList.toggle("on", sides[i].getAttribute("data-side")===sim.side);
+    for(i=0;i<types.length;i++) types[i].classList.toggle("on", types[i].getAttribute("data-type")===sim.type);
+    var px=$("simPx"), lmtOn=sim.type==="lmt";
+    px.disabled=!lmtOn; px.placeholder=lmtOn ? "限價（每股價格）" : "市價：以成交當下價格";
+    var btn=$("simSubmit");
+    btn.textContent="送出"+(buy ? "買進" : "賣出")+(lmtOn ? "限價" : "市價")+"委託";
+    btn.className="btn btn-primary sim-submit "+(buy ? "buy" : "sell");
+
+    var res=simReserved(s), p=f.valid ? s.pos[f.code] : null, canSell=p ? p.sh-(res.sh[f.code] || 0) : 0, qh="";
+    if(!f.valid) qh=f.code ? "代號格式不對，請輸入 4～6 位數字，例如 2330。" : "";
+    else if(!q) qh=sim.missing[f.code] ? "查無 "+esc(f.code)+" 的報價，請確認代號。" : "讀取報價中…";
+    else {
+      var band=limitBand(q.prevClose, f.code);
+      qh='<b>'+esc(q.name || f.code)+'</b> '+esc(f.code)+'　'
+        + (q.close!=null
+            ? '現價 <b class="'+cls(q.change || 0)+'">'+(q.approx ? "約 " : "")+fmt(q.close,2)+'</b>'+(q.change!=null ? ' <span class="'+cls(q.change)+'">'+signed(q.change,2)+(q.changePct!=null ? "（"+signed(q.changePct,2)+"%）" : "")+'</span>' : "")
+            : '昨收 <b>'+fmt(q.prevClose,2)+'</b>（'+noTradeTxt()+'）')
+        + (band ? '<br>漲停 '+fmt(band.up,2)+'・跌停 '+fmt(band.dn,2)+'・每跳 '+tickOf(simMark(q) || q.prevClose, f.code)+' 元' : "")
+        + (p ? '<br>模擬持有 '+fmt(p.sh)+' 股'+(canSell!==p.sh ? "（可賣 "+fmt(canSell)+" 股）" : "") : "");
+    }
+    $("simQuote").innerHTML=qh;
+
+    // 費用試算：限價單用限價，市價單用目前價格
+    var est = lmtOn ? f.lmt : simPrice(q), pv="";
+    if(f.valid && f.sh && est){
+      var amt=Math.round(est*100)*f.sh, fee=simFee(s, amt), tax=buy ? 0 : simTax(f.code, amt);
+      pv='預估成交金額 '+money(amt)+' 元・手續費 '+money(fee)+' 元'+(buy ? "" : '・證交稅 '+money(tax)+' 元')
+        + '<br><span class="tot">'+(buy ? "應付約 "+money(amt+fee) : "實收約 "+money(amt-fee-tax))+' 元</span>'
+        + (buy ? '　可用現金 '+money(s.cash-res.cash)+' 元' : '');
+    }
+    $("simPreview").innerHTML=pv;
+  }
+  function renderSim(){
+    var s=simLoad();
+    renderSimStatus();
+    renderSimSum(s);
+    renderSimForm();
+    renderSimOpen(s);
+    renderSimPos(s);
+    renderSimHist(s);
+  }
+
+  function simSay(t, warn){ var m=$("simMsg"); m.className="cmd-hint"+(warn ? " warn" : ""); m.textContent=t; }
+  function simSubmit(){
+    function bad(t, el){ simSay(t, true); if(el) el.focus(); }
+    var code=$("simCode").value.trim().toUpperCase(), qty=parseNum($("simQty").value), lot=$("simUnit").value==="lot", side=sim.side, type=sim.type;
+    if(!/^\d{4,6}[A-Z]?$/.test(code)) return bad("請輸入股票代號，例如 2330、0050。", $("simCode"));
+    if(qty==null || isNaN(qty) || qty%1!==0 || qty<1) return bad("數量請填正整數。", $("simQty"));
+    if(lot && qty>499) return bad("一筆委託最多 499 張。", $("simQty"));
+    if(!lot && qty>999) return bad("零股一次最多 999 股；1000 股以上請改用「張」。", $("simQty"));
+    var sh=lot ? qty*1000 : qty, lmt=null;
+    if(type==="lmt"){
+      lmt=parseNum($("simPx").value);
+      if(lmt==null || isNaN(lmt) || lmt<=0) return bad("請填限價，例如 1050 或 85.5。", $("simPx"));
+      if(!onTick(lmt, code)) return bad("價格不符合升降單位："+fmt(lmt,2)+" 元這個價位每跳 "+tickOf(lmt, code)+" 元。", $("simPx"));
+    }
+    if(!getBase()) return bad("請先在上方「後端設定」貼上你的 Worker 網址。");
+    var btn=$("simSubmit"); btn.disabled=true;
+    simSay("取得最新報價中…");
+    sim.quotes[code] && (sim.quotes[code]._at=0);   // 下單一定用最新報價
+    simQuote(code).then(function(q){
+      btn.disabled=false;
+      if(!q) return bad(sim.missing[code] ? "查無 "+code+" 的報價，請確認代號。" : "暫時拿不到 "+code+" 的報價，請稍後再試。");
+      var s=simLoad(), band=limitBand(q.prevClose, code), px=simPrice(q), res=simReserved(s);
+      if(lmt!=null && band && (lmt>band.up+1e-9 || lmt<band.dn-1e-9)) return bad("限價超出今天的漲跌停範圍（"+fmt(band.dn,2)+"～"+fmt(band.up,2)+"）。", $("simPx"));
+      if(type==="mkt" && px==null) return bad("這檔現在還沒有成交價，市價單無法成交；可以改用限價委託。");
+      var est=lmt!=null ? lmt : px, amt=Math.round(est*100)*sh;
+      if(side==="buy"){
+        var need=amt+simFee(s, amt), avail=s.cash-res.cash;
+        if(need>avail) return bad("可用現金不足：這筆約需 "+money(need)+" 元，目前可用 "+money(avail)+" 元。");
+      } else {
+        var p=s.pos[code], have=p ? p.sh-(res.sh[code] || 0) : 0;
+        if(have<sh) return bad(have>0 ? "可賣股數只有 "+fmt(have)+" 股（已扣掉委託中的賣單）。" : "模擬帳戶裡沒有 "+code+" 的持股，不能賣出。");
+      }
+      var o={ id:Date.now().toString(36)+Math.random().toString(36).slice(2,6), t:new Date().toISOString(), code:code,
+              name:String(q.name || nameOf(code) || "").slice(0,10), side:side, type:type, lmt:lmt, sh:sh, st:"open" };
+      s.orders.push(o);
+      if(type==="mkt") simFill(s, o, px, q); else simMatch(s);
+      simSave(s);
+      var what=(side==="buy" ? "買進 " : "賣出 ")+(o.name ? o.name+"（"+code+"）" : code)+" "+qtyTxt(sh);
+      if(o.st==="filled"){
+        simSay("已成交："+what+"，成交價 "+fmt(o.px,2)+"，金額 "+money(o.amt)+" 元，手續費 "+money(o.fee)+" 元"
+          +(o.tax ? "，證交稅 "+money(o.tax)+" 元" : "")+(o.pnl!=null ? "，這筆損益 "+money(o.pnl, true)+" 元" : "")+"。"+(o.note ? "（"+o.note+"）" : ""));
+      } else if(o.st==="open"){
+        simSay("已送出限價委託："+what+" @ "+fmt(lmt,2)+"。價格到了就會成交，委託中可以隨時取消。");
+      } else {
+        simSay("委託沒有成交："+(o.why || "")+"。", true);
+      }
+      $("simQty").value=""; if(type==="lmt") $("simPx").value="";
+      sim.note="";
+      renderSim();
+    });
+  }
+
+  function simEnter(){
+    var s=simLoad();
+    $("simDisc").value=String(s.disc);
+    $("simSetMsg").className="cmd-hint";
+    $("simSetMsg").textContent="目前起始資金 "+fmt(s.init)+" 元。重設帳戶會清空模擬持股、委託與成交紀錄，並以填入的金額（沒填就沿用目前金額）重新開始。";
+    renderSim();
+    var need=simCodes(s).some(function(c){ return !sim.quotes[c] && !sim.missing[c]; });
+    if(need || !sim.at || Date.now()-sim.at>30000) simRefresh();
+  }
+  function simTick(){
+    if(mode!=="sim" || document.hidden || !isTradingTime()){ renderSimStatus(); return; }
+    simRefresh();
+  }
+  function simTimerSync(){
+    var want = mode==="sim" && lsGet("skyline_sim_auto")==="1";
+    if(want && !sim.timer) sim.timer=setInterval(simTick, 60000);
+    if(!want && sim.timer){ clearInterval(sim.timer); sim.timer=null; }
+  }
+  // 從個股分析帶代號過來
+  function simOpenFor(code){
+    setMode("sim");
+    $("simCode").value=code;
+    simSay("");
+    renderSimForm();
+    simQuote(code).then(renderSimForm);
+    $("modeSim").scrollIntoView({ behavior:"smooth", block:"start" });
+  }
+
+  $("simRefresh").addEventListener("click", simRefresh);
+  $("simAuto").addEventListener("click", function(){
+    lsSet("skyline_sim_auto", lsGet("skyline_sim_auto")==="1" ? "0" : "1");
+    simTimerSync(); renderSimStatus();
+  });
+  document.addEventListener("visibilitychange", function(){
+    if(!document.hidden && mode==="sim" && lsGet("skyline_sim_auto")==="1" && isTradingTime() && Date.now()-sim.at>60000) simRefresh();
+  });
+  $("simSide").addEventListener("click", function(e){
+    var b=e.target.closest("[data-side]"); if(!b) return;
+    sim.side=b.getAttribute("data-side"); renderSimForm();
+  });
+  $("simType").addEventListener("click", function(e){
+    var b=e.target.closest("[data-type]"); if(!b) return;
+    sim.type=b.getAttribute("data-type");
+    // 切到限價時先帶入目前價格，方便微調
+    var f=simFormVals(), q=f.valid ? sim.quotes[f.code] : null, mk=simMark(q);
+    if(sim.type==="lmt" && !$("simPx").value && mk!=null) $("simPx").value=String(mk);
+    renderSimForm();
+    if(sim.type==="lmt") $("simPx").focus();
+  });
+  $("simCode").addEventListener("input", function(){
+    var c=this.value.trim().toUpperCase();
+    clearTimeout(sim.qt);
+    renderSimForm();
+    if(/^\d{4,6}[A-Z]?$/.test(c)) sim.qt=setTimeout(function(){ simQuote(c).then(renderSimForm); }, 400);
+  });
+  ["simQty","simPx"].forEach(function(id){ $(id).addEventListener("input", renderSimForm); });
+  $("simUnit").addEventListener("change", renderSimForm);
+  ["simCode","simQty","simPx"].forEach(function(id){
+    $(id).addEventListener("keydown", function(e){ if(e.key==="Enter"){ e.preventDefault(); simSubmit(); } });
+  });
+  $("simSubmit").addEventListener("click", simSubmit);
+  $("simOpen").addEventListener("click", function(e){
+    var b=e.target.closest("[data-cancel]"); if(!b) return;
+    var s=simLoad(), id=b.getAttribute("data-cancel");
+    s.orders.forEach(function(o){ if(o.id===id && o.st==="open"){ o.st="cancelled"; o.ft=new Date().toISOString(); } });
+    simSave(s);
+    simSay("已取消委託。");
+    renderSim();
+  });
+  $("simPos").addEventListener("click", function(e){
+    var b=e.target.closest("[data-sell]"); if(!b) return;
+    var c=b.getAttribute("data-sell"), s=simLoad(), p=s.pos[c]; if(!p) return;
+    var can=p.sh-(simReserved(s).sh[c] || 0);
+    sim.side="sell";
+    $("simCode").value=c;
+    if(can>0 && can%1000===0){ $("simUnit").value="lot"; $("simQty").value=String(can/1000); }
+    else { $("simUnit").value=can>=1000 ? "lot" : "share"; $("simQty").value=String(can>=1000 ? Math.floor(can/1000) : Math.max(can, 0)); }
+    simSay(can>0 ? "已帶入可賣數量，確認價格後按「送出賣出委託」。" : "這檔的股數都已經掛在委託中的賣單裡了。", can<=0);
+    renderSimForm();
+    $("simSide").scrollIntoView({ behavior:"smooth", block:"center" });
+  });
+  $("simDisc").addEventListener("change", function(){
+    var s=simLoad(); s.disc=Number(this.value) || 1; simSave(s);
+    var m=$("simSetMsg"); m.className="cmd-hint"; m.textContent="手續費折扣已更新，之後的委託都會用新的折扣計算。";
+    renderSim();
+  });
+  $("simReset").addEventListener("click", function(){
+    var m=$("simSetMsg"), s=simLoad(), v=parseNum($("simInit").value), init=v==null ? s.init : v;
+    if(isNaN(init) || init%1!==0 || init<10000 || init>1e10){ m.className="cmd-hint warn"; m.textContent="起始資金請填 1 萬到 100 億之間的整數（元），例如 1000000。"; $("simInit").focus(); return; }
+    if(!window.confirm("重設模擬帳戶？\n會清空所有模擬持股、委託與成交紀錄，並以 "+fmt(init)+" 元重新開始。")) return;
+    simSave(simNew(init, Number($("simDisc").value) || s.disc));
+    $("simInit").value="";
+    m.className="cmd-hint"; m.textContent="已重設，起始資金 "+fmt(init)+" 元。";
+    sim.note=""; simSay("");
+    renderSim();
   });
 
   // ---------- 初始化 ----------
