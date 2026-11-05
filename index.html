@@ -565,7 +565,7 @@
       <p class="panel-lead">用<b>虛擬資金</b>練習買賣與<b>放空</b>台股：依即時報價模擬成交，手續費、證交稅、借券費照實扣。<b>不會真的下單</b>，紀錄只存在這台裝置。</p>
       <div class="port-tools">
         <button class="btn-sm primary" id="simRefresh">更新報價</button>
-        <button class="btn-sm ghost" id="simAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每秒更新報價並撮合委託（走勢圖每分鐘補一次分時資料）">自動更新：關</button>
+        <button class="btn-sm ghost" id="simAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 5 秒更新報價並撮合委託（走勢圖每分鐘補一次分時資料）">自動更新：關</button>
         <span class="port-status" id="simStatus"></span>
       </div>
       <div id="simSum"></div>
@@ -2705,7 +2705,7 @@
     else if(sim.err) t=sim.err;
     else if(sim.at) t=hhmm(new Date(sim.at).toISOString())+" 更新報價"+(isTradingTime() ? "" : " · 非交易時間，以最近收盤價撮合");
     if(sim.note && !sim.loading) t+=(t ? " · " : "")+sim.note;
-    if(auto && !sim.loading && !sim.err) t+=(t ? " · " : "")+(isTradingTime() ? "盤中每秒自動更新、撮合" : "非交易時間，暫停自動更新");
+    if(auto && !sim.loading && !sim.err) t+=(t ? " · " : "")+(isTradingTime() ? "盤中每 5 秒自動更新、撮合" : "非交易時間，暫停自動更新");
     st.textContent=t;
     st.className="port-status"+(sim.err && !sim.loading ? " warn" : "");
   }
@@ -2946,7 +2946,7 @@
   }
   function simTimerSync(){
     var want = mode==="sim" && lsGet("skyline_sim_auto")==="1";
-    if(want && !sim.timer) sim.timer=setInterval(simTick, 1000);
+    if(want && !sim.timer) sim.timer=setInterval(simTick, 5000);
     if(!want && sim.timer){ clearInterval(sim.timer); sim.timer=null; }
   }
   // 從個股分析帶代號過來
@@ -2965,7 +2965,7 @@
     simTimerSync(); renderSimStatus();
   });
   document.addEventListener("visibilitychange", function(){
-    if(!document.hidden && mode==="sim" && lsGet("skyline_sim_auto")==="1" && isTradingTime() && Date.now()-sim.at>1000) simRefresh();
+    if(!document.hidden && mode==="sim" && lsGet("skyline_sim_auto")==="1" && isTradingTime() && Date.now()-sim.at>5000) simRefresh();
   });
   $("simSide").addEventListener("click", function(e){
     var b=e.target.closest("[data-side]"); if(!b) return;
