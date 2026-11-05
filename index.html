@@ -2701,7 +2701,7 @@
     $("simAuto").textContent="自動更新："+(auto ? "開" : "關");
     $("simAuto").classList.toggle("on", auto);
     $("simRefresh").disabled=sim.loading;
-    if(sim.loading && !(sim.at && Date.now()-sim.at<5000)) t="更新中…";
+    if(sim.loading && !(sim.at && Date.now()-sim.at<10000)) t="更新中…";
     else if(sim.err) t=sim.err;
     else if(sim.at) t=hhmm(new Date(sim.at).toISOString())+" 更新報價"+(isTradingTime() ? "" : " · 非交易時間，以最近收盤價撮合");
     if(sim.note && !sim.loading) t+=(t ? " · " : "")+sim.note;
