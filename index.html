@@ -278,6 +278,16 @@
   .ratio-low{color:#B42318;font-weight:700;}
   .sim-quote{font-size:13px;color:var(--muted);line-height:1.6;min-height:1.6em;}
   .sim-quote b{color:var(--ink);font-family:var(--font-disp);}
+  .sim-charts{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;}
+  .ic-card{border:1px solid var(--line-soft);border-radius:12px;background:var(--white);padding:8px 10px 6px;cursor:pointer;text-align:left;font:inherit;color:inherit;min-width:0;}
+  .ic-card:hover{border-color:#7DD3FC;}
+  .ic-top{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font-size:13px;}
+  .ic-top .n{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ic-top .p{font-family:var(--font-disp);font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .ic-chg{font-size:12px;font-variant-numeric:tabular-nums;}
+  .ic-card svg{display:block;width:100%;height:56px;margin-top:4px;}
+  .ic-foot{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);}
+  .ic-empty{font-size:12px;color:var(--muted);height:56px;display:flex;align-items:center;justify-content:center;}
   .sim-preview{font-size:13px;color:var(--muted);background:var(--mist);border-radius:10px;padding:10px 12px;line-height:1.8;font-variant-numeric:tabular-nums;}
   .sim-preview:empty{display:none;}
   .sim-preview .tot{color:var(--ink);font-weight:700;}
@@ -555,10 +565,15 @@
       <p class="panel-lead">用<b>虛擬資金</b>練習買賣與<b>放空</b>台股：依即時報價模擬成交，手續費、證交稅、借券費照實扣。<b>不會真的下單</b>，紀錄只存在這台裝置。</p>
       <div class="port-tools">
         <button class="btn-sm primary" id="simRefresh">更新報價</button>
-        <button class="btn-sm ghost" id="simAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 60 秒更新報價並撮合委託">自動更新：關</button>
+        <button class="btn-sm ghost" id="simAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 5 秒更新報價並撮合委託（走勢圖每分鐘補一次分時資料）">自動更新：關</button>
         <span class="port-status" id="simStatus"></span>
       </div>
       <div id="simSum"></div>
+
+      <div class="port-sec">
+        <div class="port-sec-head"><p class="field-label">自選股當日走勢</p><span class="port-status" id="icStatus"></span></div>
+        <div id="simCharts"></div>
+      </div>
 
       <div class="port-sec">
         <p class="field-label">下單</p>
@@ -781,6 +796,7 @@
     lsSet("skyline_watch", JSON.stringify(list.slice(0,20)));
     renderWatch();
     if(mode==="port") renderPort();   // 自選持股分頁開著時同步重畫
+    if(mode==="sim") icRefresh();
   }
   function isWatched(code){ return loadWatch().some(function(x){ return x.c===code; }); }
   function addWatch(code, name){
@@ -2526,7 +2542,7 @@
   // 要報價的代號：持股、放空部位、委託中的單、下單欄正在填的代號
   function simCodes(s){
     var seen={}, out=[], fc=$("simCode").value.trim().toUpperCase();
-    Object.keys(s.pos).concat(Object.keys(s.shorts), s.orders.filter(function(o){ return o.st==="open"; }).map(function(o){ return o.code; }), /^\d{4,6}[A-Z]?$/.test(fc) ? [fc] : [])
+    Object.keys(s.pos).concat(Object.keys(s.shorts), loadWatch().map(function(x){ return x.c; }), s.orders.filter(function(o){ return o.st==="open"; }).map(function(o){ return o.code; }), /^\d{4,6}[A-Z]?$/.test(fc) ? [fc] : [])
       .forEach(function(c){ if(!seen[c]){ seen[c]=1; out.push(c); } });
     return out;
   }
@@ -2685,11 +2701,11 @@
     $("simAuto").textContent="自動更新："+(auto ? "開" : "關");
     $("simAuto").classList.toggle("on", auto);
     $("simRefresh").disabled=sim.loading;
-    if(sim.loading) t="更新中…";
+    if(sim.loading && !(sim.at && Date.now()-sim.at<10000)) t="更新中…";
     else if(sim.err) t=sim.err;
     else if(sim.at) t=hhmm(new Date(sim.at).toISOString())+" 更新報價"+(isTradingTime() ? "" : " · 非交易時間，以最近收盤價撮合");
     if(sim.note && !sim.loading) t+=(t ? " · " : "")+sim.note;
-    if(auto && !sim.loading && !sim.err) t+=(t ? " · " : "")+(isTradingTime() ? "盤中每 60 秒自動撮合" : "非交易時間，暫停自動更新");
+    if(auto && !sim.loading && !sim.err) t+=(t ? " · " : "")+(isTradingTime() ? "盤中每 5 秒自動更新、撮合" : "非交易時間，暫停自動更新");
     st.textContent=t;
     st.className="port-status"+(sim.err && !sim.loading ? " warn" : "");
   }
@@ -2768,6 +2784,7 @@
     renderSimPos(s);
     renderSimShorts(s);
     renderSimHist(s);
+    renderIntraday();
   }
 
   function simSay(t, warn){ var m=$("simMsg"); m.className="cmd-hint"+(warn ? " warn" : ""); m.textContent=t; }
@@ -2834,6 +2851,84 @@
     });
   }
 
+  // ---------- 自選股當日走勢（/api/intraday；點卡片帶入下單代號）----------
+  var ic = { data:{}, missing:{}, at:0, loading:false, err:"" };
+  function icRefresh(){
+    var codes=loadWatch().map(function(x){ return x.c; }).slice(0,20);
+    if(!codes.length || !getBase() || ic.loading){ renderIntraday(); return; }
+    ic.loading=true; renderIntraday();
+    getJSON(getBase()+"/api/intraday?codes="+codes.join(","))
+      .then(function(r){
+        ic.data=r.charts||{}; ic.missing={};
+        (r.missing||[]).forEach(function(c){ ic.missing[c]=1; });
+        ic.at=Date.now(); ic.err="";
+      })
+      .catch(function(err){ ic.err="走勢讀取失敗："+err.message; })
+      .then(function(){ ic.loading=false; renderIntraday(); });
+  }
+  // 09:00–13:30 當橫軸；昨收畫虛線，線色依現價高於／低於昨收（紅漲綠跌）
+  function icSvg(d){
+    var pts=d.points||[]; if(pts.length<2) return '<div class="ic-empty">尚無分時資料</div>';
+    var W=200, H=56, P=3, toMin=function(t){ var a=t.split(":"); return a[0]*60+ +a[1]; };
+    var lo=Infinity, hi=-Infinity;
+    pts.forEach(function(p){ lo=Math.min(lo,p[1]); hi=Math.max(hi,p[1]); });
+    if(d.prevClose!=null){ lo=Math.min(lo,d.prevClose); hi=Math.max(hi,d.prevClose); }
+    if(hi===lo){ hi+=1; lo-=1; }
+    var X=function(t){ return Math.max(0,Math.min(W,(toMin(t)-540)/270*W)); };
+    var Y=function(v){ return P+(hi-v)/(hi-lo)*(H-2*P); };
+    var last=pts[pts.length-1][1], base=d.prevClose!=null ? d.prevClose : pts[0][1];
+    var col=last>base ? "#E11D48" : (last<base ? "#059669" : "#0EA5E9");
+    var line=pts.map(function(p){ return X(p[0]).toFixed(1)+","+Y(p[1]).toFixed(1); }).join(" ");
+    var area="M"+X(pts[0][0]).toFixed(1)+","+H+" L"+line.replace(/ /g," L")+" L"+X(pts[pts.length-1][0]).toFixed(1)+","+H+" Z";
+    var NS=' vector-effect="non-scaling-stroke"';
+    return '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" aria-hidden="true">'
+      + '<path d="'+area+'" fill="'+col+'" opacity=".08"/>'
+      + (d.prevClose!=null ? '<line x1="0" x2="'+W+'" y1="'+Y(d.prevClose).toFixed(1)+'" y2="'+Y(d.prevClose).toFixed(1)+'" stroke="#94A3B8" stroke-width="1" stroke-dasharray="3 3"'+NS+'/>' : '')
+      + '<polyline points="'+line+'" fill="none" stroke="'+col+'" stroke-width="1.6" stroke-linejoin="round"'+NS+'/></svg>';
+  }
+  function renderIntraday(){
+    var box=$("simCharts"), st=$("icStatus"), list=loadWatch();
+    if(!list.length){ box.innerHTML='<div class="port-note">還沒有自選股。在個股頁按星號，或在上方「自選股」列加入後，這裡就會顯示每檔今天的走勢。</div>'; st.textContent=""; return; }
+    if(!getBase()){ box.innerHTML='<div class="port-note">請先在上方「後端設定」貼上你的 Worker 網址。</div>'; st.textContent=""; return; }
+    var today=twToday().replace(/-/g,""), oldDay="";
+    box.innerHTML='<div class="sim-charts">'+list.slice(0,20).map(function(w){
+      var q=sim.quotes[w.c], d=ic.data[w.c] || (q && q.close!=null ? { code:w.c, points:[], date:"" } : null);
+      var name=esc(w.n || (q && q.name) || "");
+      if(!d) return '<button type="button" class="ic-card" data-ic="'+escAttr(w.c)+'"><div class="ic-top"><span class="n">'+esc(w.c)+' '+name+'</span></div>'
+        + '<div class="ic-empty">'+(ic.missing[w.c] ? "查無走勢" : (ic.loading || !ic.at ? "讀取中…" : "暫時無法取得"))+'</div></button>';
+      var lq=q;
+      if(lq && lq.close!=null && lq.date && lq.date.replace(/-/g,"")>=(d.date||"")){
+        var tm=String(lq.time||"").slice(0,5), pts0=(lq.date.replace(/-/g,"")===d.date) ? (d.points||[]).slice() : [];
+        if(/^\d\d:\d\d$/.test(tm) && tm>="09:00" && tm<="13:30"){
+          if(pts0.length && pts0[pts0.length-1][0]>=tm) pts0[pts0.length-1]=[pts0[pts0.length-1][0], lq.close]; else pts0.push([tm, lq.close]);
+        }
+        d={ code:d.code, prevClose:lq.prevClose!=null ? lq.prevClose : d.prevClose, last:lq.close, date:lq.date.replace(/-/g,""), points:pts0 };
+      }
+      if(d.date && d.date!==today) oldDay=d.date;
+      var last=d.last, pc=d.prevClose, chg=(last!=null && pc!=null) ? last-pc : null;
+      var cls=chg>0 ? "up" : (chg<0 ? "down" : "");
+      var pts=d.points||[];
+      return '<button type="button" class="ic-card" data-ic="'+escAttr(w.c)+'" title="帶入下單代號">'
+        + '<div class="ic-top"><span class="n">'+esc(w.c)+' '+name+'</span><span class="p '+cls+'">'+fmt(last,2)+'</span></div>'
+        + '<div class="ic-chg '+cls+'">'+(chg==null ? "—" : (chg>0?"▲":(chg<0?"▼":""))+fmt(Math.abs(chg),2)+'（'+(pc ? (chg/pc*100).toFixed(2) : "0.00")+'%）')+'</div>'
+        + icSvg(d)
+        + '<div class="ic-foot"><span>09:00</span><span>'+(pts.length ? pts[pts.length-1][0] : "")+'</span><span>13:30</span></div></button>';
+    }).join("")+'</div>';
+    var t="";
+    if(ic.loading) t="更新中…";
+    else if(ic.err) t=ic.err;
+    else if(ic.at) t=hhmm(new Date(ic.at).toISOString())+" 更新"+(oldDay ? " · 今日未開盤，顯示 "+oldDay.slice(4,6)+"/"+oldDay.slice(6)+" 走勢" : "")+" · 灰色虛線為昨收";
+    st.textContent=t;
+    st.className="port-status"+(ic.err && !ic.loading ? " warn" : "");
+  }
+  $("simCharts").addEventListener("click", function(e){
+    var b=e.target.closest("[data-ic]"); if(!b) return;
+    var c=b.getAttribute("data-ic");
+    $("simCode").value=c; simSay("");
+    renderSimForm(); simQuote(c).then(renderSimForm);
+    $("simSide").scrollIntoView({ behavior:"smooth", block:"center" });
+  });
+
   function simEnter(){
     var s=simLoad();
     $("simFeePlan").value=feePlanKey();
@@ -2842,14 +2937,16 @@
     renderSim();
     var need=simCodes(s).some(function(c){ return !sim.quotes[c] && !sim.missing[c]; });
     if(need || !sim.at || Date.now()-sim.at>30000) simRefresh();
+    if(!ic.at || Date.now()-ic.at>60000) icRefresh(); else renderIntraday();
   }
   function simTick(){
     if(mode!=="sim" || document.hidden || !isTradingTime()){ renderSimStatus(); return; }
     simRefresh();
+    if(Date.now()-ic.at>60000) icRefresh();
   }
   function simTimerSync(){
     var want = mode==="sim" && lsGet("skyline_sim_auto")==="1";
-    if(want && !sim.timer) sim.timer=setInterval(simTick, 60000);
+    if(want && !sim.timer) sim.timer=setInterval(simTick, 5000);
     if(!want && sim.timer){ clearInterval(sim.timer); sim.timer=null; }
   }
   // 從個股分析帶代號過來
@@ -2862,13 +2959,13 @@
     $("modeSim").scrollIntoView({ behavior:"smooth", block:"start" });
   }
 
-  $("simRefresh").addEventListener("click", simRefresh);
+  $("simRefresh").addEventListener("click", function(){ simRefresh(); icRefresh(); });
   $("simAuto").addEventListener("click", function(){
     lsSet("skyline_sim_auto", lsGet("skyline_sim_auto")==="1" ? "0" : "1");
     simTimerSync(); renderSimStatus();
   });
   document.addEventListener("visibilitychange", function(){
-    if(!document.hidden && mode==="sim" && lsGet("skyline_sim_auto")==="1" && isTradingTime() && Date.now()-sim.at>60000) simRefresh();
+    if(!document.hidden && mode==="sim" && lsGet("skyline_sim_auto")==="1" && isTradingTime() && Date.now()-sim.at>5000) simRefresh();
   });
   $("simSide").addEventListener("click", function(e){
     var b=e.target.closest("[data-side]"); if(!b) return;
