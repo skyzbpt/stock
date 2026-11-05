@@ -457,6 +457,51 @@ async function fetchQuotes(codes) {
   return { asOf: new Date().toISOString(), quotes, missing: codes.filter((c) => !quotes[c] && unavailable.indexOf(c) === -1), unavailable };
 }
 
+// ---- 當日分時走勢（/api/intraday：模擬交易的自選股走勢圖）----
+// 證交所沒有公開的分時序列，改用 Yahoo Finance 圖表端點（5 分鐘一點）；上市用 .TW，查不到再試上櫃 .TWO
+const INTRADAY_MAX = 20, INTRADAY_TTL = 60;
+async function yahooChart(sym) {
+  const res = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/" + sym + "?interval=5m&range=1d", {
+    headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
+    cf: { cacheTtl: INTRADAY_TTL, cacheEverything: true },
+    signal: AbortSignal.timeout(RT_TIMEOUT_MS)
+  });
+  if (!res.ok) return null;
+  const j = await res.json().catch(() => null);
+  return (j && j.chart && Array.isArray(j.chart.result) && j.chart.result[0]) || null;
+}
+async function fetchIntraday(code) {
+  return memo("intraday:" + code, INTRADAY_TTL, async () => {
+    for (const suf of [".TW", ".TWO"]) {
+      let r;
+      try { r = await yahooChart(code + suf); } catch (e) { continue; }
+      if (!r || !r.meta) continue;
+      const ts = r.timestamp || [], q = (r.indicators && r.indicators.quote && r.indicators.quote[0]) || {};
+      const closes = q.close || [], pts = [];
+      for (let i = 0; i < ts.length; i++) {
+        const c = closes[i];
+        if (c == null || isNaN(c)) continue;
+        // 台灣時間「HH:MM」
+        const d = new Date((ts[i] + 8 * 3600) * 1000);
+        pts.push([String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0"), Math.round(c * 100) / 100]);
+      }
+      const m = r.meta, prev = m.chartPreviousClose != null ? m.chartPreviousClose : m.previousClose;
+      const day = ts.length ? ymdOf(new Date((ts[ts.length - 1] + 8 * 3600) * 1000)) : "";
+      return { code, ex: suf === ".TW" ? "tse" : "otc", prevClose: prev != null ? Math.round(prev * 100) / 100 : null,
+        last: m.regularMarketPrice != null ? Math.round(m.regularMarketPrice * 100) / 100 : (pts.length ? pts[pts.length - 1][1] : null),
+        date: day, points: pts };
+    }
+    return null;
+  });
+}
+async function fetchIntradayMany(codes) {
+  const out = {}, missing = [];
+  const rs = await Promise.all(codes.map((c) => fetchIntraday(c).catch(() => null)));
+  rs.forEach((r, i) => { if (r) out[codes[i]] = r; else missing.push(codes[i]); });
+  if (codes.length && !Object.keys(out).length) throw new Error("分時走勢暫時無法取得，請稍後再試");
+  return { asOf: new Date().toISOString(), charts: out, missing };
+}
+
 // ---- 個股日成交（給 K 線圖與技術分析用）----
 // 抓最近 4 個月（前 3 個月＋當月），留最後 80 個交易日：60 日均線、MACD 都需要夠長的資料
 const HIST_MONTHS = 4, HIST_ROWS = 80;
@@ -1680,6 +1725,13 @@ export default {
         return json(await fetchQuotes(p.codes));
       }
 
+      if (url.pathname === "/api/intraday") {
+        const p = parseCodes(url.searchParams.get("codes"));
+        if (p.error) return json({ error: p.error }, 400);
+        if (p.codes.length > INTRADAY_MAX) return json({ error: "一次最多查詢 " + INTRADAY_MAX + " 檔走勢" }, 400);
+        return json(await fetchIntradayMany(p.codes));
+      }
+
       if (url.pathname === "/api/screen") {
         return json(await buildScreen());
       }
@@ -1725,7 +1777,7 @@ export default {
         });
       }
       if (url.pathname === "/api") {
-        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/quotes?codes=2330,6488,0050", "GET /api/screen", "GET /api/debug[?code=2330&otc=6488 | ?ds=t86&code=2330]", "POST /api/analyze", "POST /api/news", "POST /api/command"] });
+        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/quotes?codes=2330,6488,0050", "GET /api/intraday?codes=2330,0050", "GET /api/screen", "GET /api/debug[?code=2330&otc=6488 | ?ds=t86&code=2330]", "POST /api/analyze", "POST /api/news", "POST /api/command"] });
       }
       return json({ error: "Not found" }, 404);
     } catch (e) {
