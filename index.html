@@ -565,7 +565,7 @@
       <p class="panel-lead">用<b>虛擬資金</b>練習買賣與<b>放空</b>台股：依即時報價模擬成交，手續費、證交稅、借券費照實扣。<b>不會真的下單</b>，紀錄只存在這台裝置。</p>
       <div class="port-tools">
         <button class="btn-sm primary" id="simRefresh">更新報價</button>
-        <button class="btn-sm ghost" id="simAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 60 秒更新報價並撮合委託">自動更新：關</button>
+        <button class="btn-sm ghost" id="simAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每秒更新報價並撮合委託（走勢圖每分鐘補一次分時資料）">自動更新：關</button>
         <span class="port-status" id="simStatus"></span>
       </div>
       <div id="simSum"></div>
@@ -2542,7 +2542,7 @@
   // 要報價的代號：持股、放空部位、委託中的單、下單欄正在填的代號
   function simCodes(s){
     var seen={}, out=[], fc=$("simCode").value.trim().toUpperCase();
-    Object.keys(s.pos).concat(Object.keys(s.shorts), s.orders.filter(function(o){ return o.st==="open"; }).map(function(o){ return o.code; }), /^\d{4,6}[A-Z]?$/.test(fc) ? [fc] : [])
+    Object.keys(s.pos).concat(Object.keys(s.shorts), loadWatch().map(function(x){ return x.c; }), s.orders.filter(function(o){ return o.st==="open"; }).map(function(o){ return o.code; }), /^\d{4,6}[A-Z]?$/.test(fc) ? [fc] : [])
       .forEach(function(c){ if(!seen[c]){ seen[c]=1; out.push(c); } });
     return out;
   }
@@ -2701,11 +2701,11 @@
     $("simAuto").textContent="自動更新："+(auto ? "開" : "關");
     $("simAuto").classList.toggle("on", auto);
     $("simRefresh").disabled=sim.loading;
-    if(sim.loading) t="更新中…";
+    if(sim.loading && !(sim.at && Date.now()-sim.at<5000)) t="更新中…";
     else if(sim.err) t=sim.err;
     else if(sim.at) t=hhmm(new Date(sim.at).toISOString())+" 更新報價"+(isTradingTime() ? "" : " · 非交易時間，以最近收盤價撮合");
     if(sim.note && !sim.loading) t+=(t ? " · " : "")+sim.note;
-    if(auto && !sim.loading && !sim.err) t+=(t ? " · " : "")+(isTradingTime() ? "盤中每 60 秒自動撮合" : "非交易時間，暫停自動更新");
+    if(auto && !sim.loading && !sim.err) t+=(t ? " · " : "")+(isTradingTime() ? "盤中每秒自動更新、撮合" : "非交易時間，暫停自動更新");
     st.textContent=t;
     st.className="port-status"+(sim.err && !sim.loading ? " warn" : "");
   }
@@ -2784,6 +2784,7 @@
     renderSimPos(s);
     renderSimShorts(s);
     renderSimHist(s);
+    renderIntraday();
   }
 
   function simSay(t, warn){ var m=$("simMsg"); m.className="cmd-hint"+(warn ? " warn" : ""); m.textContent=t; }
@@ -2891,10 +2892,18 @@
     if(!getBase()){ box.innerHTML='<div class="port-note">請先在上方「後端設定」貼上你的 Worker 網址。</div>'; st.textContent=""; return; }
     var today=twToday().replace(/-/g,""), oldDay="";
     box.innerHTML='<div class="sim-charts">'+list.slice(0,20).map(function(w){
-      var d=ic.data[w.c], q=sim.quotes[w.c];
+      var q=sim.quotes[w.c], d=ic.data[w.c] || (q && q.close!=null ? { code:w.c, points:[], date:"" } : null);
       var name=esc(w.n || (q && q.name) || "");
       if(!d) return '<button type="button" class="ic-card" data-ic="'+escAttr(w.c)+'"><div class="ic-top"><span class="n">'+esc(w.c)+' '+name+'</span></div>'
         + '<div class="ic-empty">'+(ic.missing[w.c] ? "查無走勢" : (ic.loading || !ic.at ? "讀取中…" : "暫時無法取得"))+'</div></button>';
+      var lq=q;
+      if(lq && lq.close!=null && lq.date && lq.date.replace(/-/g,"")>=(d.date||"")){
+        var tm=String(lq.time||"").slice(0,5), pts0=(lq.date.replace(/-/g,"")===d.date) ? (d.points||[]).slice() : [];
+        if(/^\d\d:\d\d$/.test(tm) && tm>="09:00" && tm<="13:30"){
+          if(pts0.length && pts0[pts0.length-1][0]>=tm) pts0[pts0.length-1]=[pts0[pts0.length-1][0], lq.close]; else pts0.push([tm, lq.close]);
+        }
+        d={ code:d.code, prevClose:lq.prevClose!=null ? lq.prevClose : d.prevClose, last:lq.close, date:lq.date.replace(/-/g,""), points:pts0 };
+      }
       if(d.date && d.date!==today) oldDay=d.date;
       var last=d.last, pc=d.prevClose, chg=(last!=null && pc!=null) ? last-pc : null;
       var cls=chg>0 ? "up" : (chg<0 ? "down" : "");
@@ -2932,11 +2941,12 @@
   }
   function simTick(){
     if(mode!=="sim" || document.hidden || !isTradingTime()){ renderSimStatus(); return; }
-    simRefresh(); icRefresh();
+    simRefresh();
+    if(Date.now()-ic.at>60000) icRefresh();
   }
   function simTimerSync(){
     var want = mode==="sim" && lsGet("skyline_sim_auto")==="1";
-    if(want && !sim.timer) sim.timer=setInterval(simTick, 60000);
+    if(want && !sim.timer) sim.timer=setInterval(simTick, 1000);
     if(!want && sim.timer){ clearInterval(sim.timer); sim.timer=null; }
   }
   // 從個股分析帶代號過來
@@ -2955,7 +2965,7 @@
     simTimerSync(); renderSimStatus();
   });
   document.addEventListener("visibilitychange", function(){
-    if(!document.hidden && mode==="sim" && lsGet("skyline_sim_auto")==="1" && isTradingTime() && Date.now()-sim.at>60000) simRefresh();
+    if(!document.hidden && mode==="sim" && lsGet("skyline_sim_auto")==="1" && isTradingTime() && Date.now()-sim.at>1000) simRefresh();
   });
   $("simSide").addEventListener("click", function(e){
     var b=e.target.closest("[data-side]"); if(!b) return;

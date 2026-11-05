@@ -429,7 +429,7 @@ async function fetchQuotes(codes) {
     try {
       const res = await fetch(MIS_URL + "?ex_ch=" + exCh + "&json=1&delay=0", {
         headers: MIS_HEADERS,
-        cf: { cacheTtl: 15, cacheEverything: true },
+        cf: { cacheTtl: 1, cacheEverything: true },
         signal: AbortSignal.timeout(QUOTES_TIMEOUT_MS)
       });
       if (!res.ok) return null;
