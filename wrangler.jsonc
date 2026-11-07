@@ -8,5 +8,11 @@
 	},
 	"compatibility_flags": [
 		"nodejs_compat"
+	],
+	// 網頁用到的圖示與 PWA 檔案一起打包進 Worker，打開 Worker 網址時 favicon、安裝 App 才會正常。
+	// fallthrough: true 讓內建規則（例如 index.html 當文字打包）繼續生效，不能拿掉。
+	"rules": [
+		{ "type": "Data", "globs": ["**/*.png"], "fallthrough": true },
+		{ "type": "Text", "globs": ["**/*.svg", "**/*.webmanifest", "**/sw.js"], "fallthrough": true }
 	]
 }
