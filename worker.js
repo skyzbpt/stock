@@ -3,6 +3,7 @@
  * ------------------------------------------------------------------
  * 路由：
  *   GET  /                      → 網頁本體（index.html 一起打包進 Worker，打開 Worker 網址就是完整網頁）
+ *   GET  /favicon.svg、/manifest.webmanifest、/sw.js、/*.png → 網頁用到的圖示與 PWA 檔案（同樣打包進 Worker）
  *   GET  /api                   → API 路由清單
  *   GET  /api/stock?code=2330   → 行情＋估值＋三大法人＋近四個月日 K（開高低收量）＋技術指標（秒讀；上市、上櫃皆可）
  *   GET  /api/extra?code=2330   → 基本面與籌碼：月營收、季 EPS、股利、融資融券、外資持股、重大訊息、大盤
@@ -36,6 +37,27 @@
 
 // 網頁本體：wrangler 預設把 .html 當文字模組打包，Worker 網址打開就是網頁（GitHub Pages 版照常可用）
 import INDEX_HTML from "./index.html";
+// 網頁用到的圖示與 PWA 檔案（.png／.svg／.webmanifest／sw.js 的打包規則在 wrangler.jsonc 的 rules）。
+// 少了這些，用 Worker 網址打開時 favicon 會破圖、也沒辦法安裝到主畫面（GitHub Pages 版本來就有這些檔案）。
+import FAVICON_SVG from "./favicon.svg";
+import MANIFEST from "./manifest.webmanifest";
+import SW_JS from "./sw.js";
+import ICON_192 from "./icon-192.png";
+import ICON_512 from "./icon-512.png";
+import ICON_MASKABLE from "./icon-maskable-512.png";
+import APPLE_TOUCH_ICON from "./apple-touch-icon.png";
+
+const ONE_DAY = "public, max-age=86400";
+const STATIC_FILES = {
+  "/favicon.svg":           [FAVICON_SVG, "image/svg+xml", ONE_DAY],
+  "/favicon.ico":           [ICON_192, "image/png", ONE_DAY],   // 有些瀏覽器仍會直接找網站根目錄的 /favicon.ico
+  "/icon-192.png":          [ICON_192, "image/png", ONE_DAY],
+  "/icon-512.png":          [ICON_512, "image/png", ONE_DAY],
+  "/icon-maskable-512.png": [ICON_MASKABLE, "image/png", ONE_DAY],
+  "/apple-touch-icon.png":  [APPLE_TOUCH_ICON, "image/png", ONE_DAY],
+  "/manifest.webmanifest":  [MANIFEST, "application/manifest+json; charset=utf-8", "no-cache"],
+  "/sw.js":                 [SW_JS, "text/javascript; charset=utf-8", "no-cache"]
+};
 
 const ANTHROPIC_MODEL   = "claude-sonnet-4-6";        // 想更快、更省成本可改 "claude-haiku-4-5-20251001"
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -1775,6 +1797,10 @@ export default {
         return new Response(INDEX_HTML, {
           headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" }
         });
+      }
+      const file = STATIC_FILES[url.pathname];
+      if (file && (request.method === "GET" || request.method === "HEAD")) {
+        return new Response(file[0], { headers: { "Content-Type": file[1], "Cache-Control": file[2] } });
       }
       if (url.pathname === "/api") {
         return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/quotes?codes=2330,6488,0050", "GET /api/intraday?codes=2330,0050", "GET /api/screen", "GET /api/debug[?code=2330&otc=6488 | ?ds=t86&code=2330]", "POST /api/analyze", "POST /api/news", "POST /api/command"] });
