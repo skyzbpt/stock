@@ -1,11 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#38BDF8"/><stop offset="1" stop-color="#0369A1"/>
     </linearGradient>
+    <radialGradient id="glow" cx=".22" cy=".12" r=".85">
+      <stop offset="0" stop-color="#fff" stop-opacity=".3"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
   </defs>
-  <rect width="64" height="64" rx="15" fill="url(#g)"/>
-  <path d="M12 43 L24 32 L33 37 L44 22 L53 15" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="53" cy="15" r="4.5" fill="#fff"/>
-  <path d="M12 51 H52" stroke="#fff" stroke-opacity=".5" stroke-width="3.5" stroke-linecap="round"/>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <rect width="64" height="64" rx="14" fill="url(#glow)"/>
+  <g id="glyph">
+    <g transform="translate(0 1.6)" fill="#0C4A6E" fill-opacity=".28">
+      <rect x="15.75" y="29" width="2.5" height="22" rx="1.25"/><rect x="11.5" y="34" width="11" height="12" rx="3"/>
+      <rect x="30.75" y="21" width="2.5" height="24" rx="1.25"/><rect x="26.5" y="25" width="11" height="15" rx="3"/>
+      <rect x="45.75" y="9" width="2.5" height="27" rx="1.25"/><rect x="41.5" y="13" width="11" height="18" rx="3"/>
+    </g>
+    <g fill="#fff">
+      <rect x="15.75" y="29" width="2.5" height="22" rx="1.25"/><rect x="11.5" y="34" width="11" height="12" rx="3"/>
+      <rect x="30.75" y="21" width="2.5" height="24" rx="1.25"/><rect x="26.5" y="25" width="11" height="15" rx="3"/>
+      <rect x="45.75" y="9" width="2.5" height="27" rx="1.25"/><rect x="41.5" y="13" width="11" height="18" rx="3"/>
+    </g>
+  </g>
 </svg>

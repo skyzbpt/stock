@@ -6,10 +6,10 @@
 <meta name="theme-color" content="#F0F7FB" media="(prefers-color-scheme: light)" />
 <meta name="theme-color" content="#0B1724" media="(prefers-color-scheme: dark)" />
 <meta name="color-scheme" content="light dark" />
-<!-- 圖示網址的 ?v= 是版本號：換圖示時一起改（sw.js 的清單也要改），瀏覽器才會重抓，不會卡在舊圖或破圖 -->
-<link rel="icon" href="favicon.svg?v=2" type="image/svg+xml" />
-<link rel="icon" href="icon-192.png?v=2" type="image/png" sizes="192x192" />
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=2" />
+<!-- 圖示網址的 ?v= 是版本號：換圖示時一起改（manifest.webmanifest 和 sw.js 的清單也要改），瀏覽器才會重抓，不會卡在舊圖或破圖 -->
+<link rel="icon" href="favicon.svg?v=3" type="image/svg+xml" />
+<link rel="icon" href="icon-192.png?v=3" type="image/png" sizes="192x192" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=3" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -44,8 +44,8 @@
   /* ---------- Header ---------- */
   .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;}
   .brand{display:flex;align-items:center;gap:12px;}
-  .brand-mark{width:40px;height:40px;flex:0 0 40px;border-radius:11px;display:flex;align-items:center;justify-content:center;
-    background:linear-gradient(150deg,var(--sky-bright),var(--sky-deep));box-shadow:0 6px 16px -6px rgba(3,105,161,.5);}
+  .brand-mark{width:40px;height:40px;flex:0 0 40px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(circle at 22% 12%,rgba(255,255,255,.3),rgba(255,255,255,0) 70%),linear-gradient(135deg,#38BDF8,#0369A1);box-shadow:0 6px 16px -6px rgba(3,105,161,.5);}
   .brand-name{font-family:var(--font-disp);font-weight:700;font-size:20px;line-height:1.1;}
   .brand-sub{font-size:12.5px;color:var(--muted);margin-top:2px;letter-spacing:.02em;}
   .live-pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--sky-deep);background:var(--mist-2);
@@ -539,10 +539,17 @@
   <header class="topbar">
     <div class="brand">
       <div class="brand-mark">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M3 16.5 L8 12.5 L11.5 14.5 L16 8.5 L21 5" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="21" cy="5" r="1.7" fill="#fff"/>
-          <path d="M3 19.5 H21" stroke="rgba(255,255,255,.5)" stroke-width="1.4" stroke-linecap="round"/>
+        <svg width="40" height="40" viewBox="0 0 64 64" aria-hidden="true">
+          <g transform="translate(0 1.6)" fill="#0C4A6E" fill-opacity=".28">
+            <rect x="15.75" y="29" width="2.5" height="22" rx="1.25"/><rect x="11.5" y="34" width="11" height="12" rx="3"/>
+            <rect x="30.75" y="21" width="2.5" height="24" rx="1.25"/><rect x="26.5" y="25" width="11" height="15" rx="3"/>
+            <rect x="45.75" y="9" width="2.5" height="27" rx="1.25"/><rect x="41.5" y="13" width="11" height="18" rx="3"/>
+          </g>
+          <g fill="#fff">
+            <rect x="15.75" y="29" width="2.5" height="22" rx="1.25"/><rect x="11.5" y="34" width="11" height="12" rx="3"/>
+            <rect x="30.75" y="21" width="2.5" height="24" rx="1.25"/><rect x="26.5" y="25" width="11" height="15" rx="3"/>
+            <rect x="45.75" y="9" width="2.5" height="27" rx="1.25"/><rect x="41.5" y="13" width="11" height="18" rx="3"/>
+          </g>
         </svg>
       </div>
       <div>

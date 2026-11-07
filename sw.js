@@ -3,12 +3,10 @@
 // 股價、AI 分析等後端 API 一律直接走網路、不快取，不會拿到舊資料：
 //   - GitHub Pages 版：後端在別的網域（Cloudflare Worker），本來就不攔截
 //   - Worker 版：網頁和 /api/ 在同一個網域，靠下面的白名單只處理網頁與圖示
-var CACHE = "skyline-v2";
+var CACHE = "skyline-v3";
+// 圖示網址的 ?v= 要和 index.html、manifest.webmanifest 裡的一致（換圖示時三個地方一起改）
 var SHELL = ["./", "index.html", "manifest.webmanifest",
-  // index.html 用的圖示（?v= 要和 index.html 裡的一致）
-  "favicon.svg?v=2", "icon-192.png?v=2", "apple-touch-icon.png?v=2",
-  // manifest.webmanifest 用的圖示
-  "favicon.svg", "icon-192.png", "icon-512.png", "icon-maskable-512.png"];
+  "favicon.svg?v=3", "icon-192.png?v=3", "icon-512.png?v=3", "icon-maskable-512.png?v=3", "apple-touch-icon.png?v=3"];
 
 self.addEventListener("install", function(e){
   e.waitUntil(caches.open(CACHE).then(function(c){ return c.addAll(SHELL); }).then(function(){ return self.skipWaiting(); }));
