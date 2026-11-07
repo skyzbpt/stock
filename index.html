@@ -73,6 +73,27 @@
   .btn-sm.ghost{background:transparent;color:var(--sky-deep);border-color:var(--line);}
   .btn-sm.ghost:hover{border-color:var(--sky-bright);background:var(--mist);}
   .cfg-hint{width:100%;font-size:12px;color:var(--faint);margin-top:2px;}
+  /* ---------- 雲端同步 ---------- */
+  .cfg + .cfg{margin-top:8px;}
+  .cfg.sync summary::before{content:"☁";}
+  .cfg .sdot.busy{background:var(--sky);animation:sdotPulse 1.1s ease-in-out infinite;}
+  @keyframes sdotPulse{50%{opacity:.3;}}
+  .sync-body{display:block;}
+  .sync-body [hidden]{display:none !important;}
+  .sync-lead{font-size:13px;color:var(--muted);margin:0 0 4px;line-height:1.65;}
+  .sync-lead b{color:var(--ink);font-weight:600;}
+  .sync-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;}
+  .sync-row .cfg-input{flex:1 1 230px;font-family:var(--font-disp);letter-spacing:.04em;}
+  .sync-note{font-size:12px;color:var(--faint);}
+  .sync-code{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--mist);border:1px solid var(--line);border-radius:10px;padding:9px 12px;}
+  .sync-code .k{font-size:12px;color:var(--faint);font-weight:600;}
+  .sync-code code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:15px;font-weight:700;letter-spacing:.05em;
+    color:var(--ink);flex:1 1 auto;min-width:0;word-break:break-all;}
+  .sync-code .link-btn{color:var(--sky-deep);font-weight:600;font-size:12.5px;}
+  .sync-choice{margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--mist);}
+  .sync-choice p{margin:0;font-size:13.5px;color:var(--ink);}
+  .btn-sm.danger{color:#B42318;border-color:#FBD5D0;}
+  .btn-sm.danger:hover{background:#FEF3F2;border-color:#F5A9A0;}
   .cfg-hint code{font-family:var(--font-disp);background:var(--mist-2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;}
 
   /* ---------- Horizon ---------- */
@@ -429,6 +450,7 @@
   }
   @media (prefers-reduced-motion:reduce){
     .fade{animation:none;}
+    .cfg .sdot.busy{animation:none;}
     .spinner{animation-duration:1.4s;}
     .sk{animation:none;background:var(--mist);}
   }
@@ -502,6 +524,8 @@
     :root:not([data-theme="light"]) .icon-btn.star-on{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4);}
     :root:not([data-theme="light"]) .cmd-badge.deep{color:#FCD34D;background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.3);}
     :root:not([data-theme="light"]) .hint{color:#FDBA74;}
+    :root:not([data-theme="light"]) .btn-sm.danger{color:#FCA5A5;border-color:rgba(239,68,68,.35);}
+    :root:not([data-theme="light"]) .btn-sm.danger:hover{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.5);}
     :root:not([data-theme="light"]) .chip-scen.active,:root:not([data-theme="light"]) .an-tab.active{background:var(--sky);border-color:var(--sky);}
     :root:not([data-theme="light"]) .btn-primary:hover,:root:not([data-theme="light"]) .btn-sm.primary:hover{background:#0284C7;border-color:#0284C7;}
   }
@@ -518,6 +542,8 @@
   :root[data-theme="dark"] .icon-btn.star-on{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4);}
   :root[data-theme="dark"] .cmd-badge.deep{color:#FCD34D;background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.3);}
   :root[data-theme="dark"] .hint{color:#FDBA74;}
+  :root[data-theme="dark"] .btn-sm.danger{color:#FCA5A5;border-color:rgba(239,68,68,.35);}
+  :root[data-theme="dark"] .btn-sm.danger:hover{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.5);}
   :root[data-theme="dark"] .chip-scen.active,:root[data-theme="dark"] .an-tab.active{background:var(--sky);border-color:var(--sky);}
   :root[data-theme="dark"] .btn-primary:hover,:root[data-theme="dark"] .btn-sm.primary:hover{background:#0284C7;border-color:#0284C7;}
   .theme-btn{width:36px;height:36px;flex:0 0 36px;border-radius:999px;border:1px solid var(--line);background:var(--mist-2);
@@ -566,7 +592,47 @@
       <input id="workerUrl" class="cfg-input" type="text" placeholder="https://你的-worker.workers.dev" autocomplete="off" spellcheck="false" />
       <button id="saveWorker" class="btn-sm primary">儲存</button>
       <button id="testWorker" class="btn-sm ghost">測試連線</button>
-      <div class="cfg-hint">貼上你部署好的 Cloudflare Worker 網址（不含結尾斜線）。程式會呼叫 <code>/api/stock</code>、<code>/api/extra</code>、<code>/api/quotes</code> 與 <code>/api/analyze</code>；證交所／櫃買中心資料源是否正常可直接開 <code>/api/debug</code> 檢查。</div>
+      <div class="cfg-hint">貼上你部署好的 Cloudflare Worker 網址（不含結尾斜線）。程式會呼叫 <code>/api/stock</code>、<code>/api/extra</code>、<code>/api/quotes</code>、<code>/api/analyze</code> 與 <code>/api/sync</code>；證交所／櫃買中心資料源是否正常可直接開 <code>/api/debug</code> 檢查。</div>
+    </div>
+  </details>
+
+  <details class="cfg sync" id="syncCfg">
+    <summary>雲端同步<span class="status"><span class="sdot" id="syncDot"></span><span id="syncStat">未開啟</span></span></summary>
+    <div class="cfg-body sync-body">
+      <div id="syncOff">
+        <p class="sync-lead">把<b>自選股、持股、價格警示、模擬交易、研究紀錄</b>存到 Cloudflare 雲端資料庫，手機、電腦打開都是同一份。不用註冊帳號，靠一組「同步碼」連結你的裝置。</p>
+        <div class="sync-row">
+          <button class="btn-sm primary" id="syncEnable">開啟雲端同步</button>
+          <span class="sync-note">第一次用請按這裡，會產生一組同步碼</span>
+        </div>
+        <div class="sync-row">
+          <input id="syncCodeIn" class="cfg-input" type="text" placeholder="已經有同步碼？在這裡輸入" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="同步碼" />
+          <button class="btn-sm ghost" id="syncLinkBtn">連結這台裝置</button>
+        </div>
+        <div class="sync-choice" id="syncChoice" hidden>
+          <p><b>雲端和這台裝置都有資料，要用哪一份？</b></p>
+          <div class="sync-row">
+            <button class="btn-sm primary" id="syncUseCloud">用雲端的資料</button>
+            <button class="btn-sm ghost" id="syncUseLocal">用這台裝置的資料</button>
+            <button class="link-btn" id="syncCancel">取消</button>
+          </div>
+          <div class="cfg-hint" style="margin-top:8px;">選「雲端」：這台裝置的自選股、持股、模擬交易等，會換成雲端上的版本。選「這台裝置」：雲端和其他已同步的裝置，會換成這台的資料。</div>
+        </div>
+      </div>
+      <div id="syncOn" hidden>
+        <div class="sync-code">
+          <span class="k">同步碼</span><code id="syncCodeShow"></code>
+          <button class="link-btn" id="syncRevealBtn">顯示</button>
+          <button class="link-btn" id="syncCopyBtn">複製</button>
+        </div>
+        <div class="cfg-hint" style="margin-top:8px;">在另一台裝置打開這個網站 → 雲端同步 → 輸入這組同步碼，就會看到同一份資料。<b>同步碼就像鑰匙，請不要給別人。</b></div>
+        <div class="sync-row">
+          <button class="btn-sm primary" id="syncNowBtn">立即同步</button>
+          <button class="btn-sm ghost" id="syncOffBtn">這台裝置停止同步</button>
+          <button class="btn-sm ghost danger" id="syncWipeBtn">刪除雲端資料</button>
+        </div>
+      </div>
+      <div class="cmd-hint" id="syncMsg" aria-live="polite"></div>
     </div>
   </details>
 
@@ -645,7 +711,7 @@
     </div>
 
     <div id="modePort" style="display:none;">
-      <p class="panel-lead">一次看<b>自選股即時行情</b>、設定<b>價格警示</b>，再幫你算<b>持股損益</b>。這些設定只存在這台裝置。</p>
+      <p class="panel-lead">一次看<b>自選股即時行情</b>、設定<b>價格警示</b>，再幫你算<b>持股損益</b>。這些設定存在這台裝置；開啟上方的「雲端同步」，手機和電腦就會看到同一份。</p>
       <div class="port-tools">
         <button class="btn-sm primary" id="portRefresh">重新整理</button>
         <button class="btn-sm ghost" id="portAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 60 秒自動更新">自動更新：關</button>
@@ -683,7 +749,7 @@
     </div>
 
     <div id="modeSim" style="display:none;">
-      <p class="panel-lead">用<b>虛擬資金</b>練習買賣與<b>放空</b>台股：依即時報價模擬成交，手續費、證交稅、借券費照實扣。<b>不會真的下單</b>，紀錄只存在這台裝置。</p>
+      <p class="panel-lead">用<b>虛擬資金</b>練習買賣與<b>放空</b>台股：依即時報價模擬成交，手續費、證交稅、借券費照實扣。<b>不會真的下單</b>；紀錄存在這台裝置，開啟「雲端同步」就能帶到其他裝置。</p>
       <div class="port-tools">
         <button class="btn-sm primary" id="simRefresh">更新報價</button>
         <button class="btn-sm ghost" id="simAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 5 秒更新報價並撮合委託（走勢圖每分鐘補一次分時資料）">自動更新：關</button>
@@ -843,7 +909,7 @@
 
   var $ = function(id){ return document.getElementById(id); };
   function lsGet(k){ try{return localStorage.getItem(k);}catch(e){return null;} }
-  function lsSet(k,v){ try{localStorage.setItem(k,v);}catch(e){} }
+  function lsSet(k,v){ try{localStorage.setItem(k,v);}catch(e){} syncTouch(k); }   // 有開雲端同步時，同步項目改了會自動上傳
 
   var qEl=$("q"), goEl=$("go"), hintEl=$("hint");
   var resultEl=$("result"), statCard=$("statCard"), techCard=$("techCard"), extraCard=$("extraCard"), anWrap=$("anWrap"), anArea=$("anArea"), anTabs=$("anTabs");
@@ -878,7 +944,7 @@
     var b = getBase();
     if(!b){ setStatus("bad","請先輸入網址"); return; }
     setStatus("", "測試中…");
-    fetch(b + "/", { method:"GET" })
+    fetch(b + "/api", { method:"GET" })
       .then(function(r){ return r.json(); })
       .then(function(j){
         if(j && j.name){ setStatus("ok","連線正常"); cfgEl.open=false; }
@@ -1806,7 +1872,7 @@
     { k:"catalysts", g:"stock", t:"催化事件", need:"code", eta:"約 1–2 分鐘",
       d:"未來 1–6 個月可能影響股價的事件表：法說會、除權息、新品擴產、訂單、產業與政策。" },
     { k:"thesis", g:"stock", t:"建立投資論點", need:"code", eta:"約 1–2 分鐘",
-      d:"核心論點、三大支柱、反方論點、可量化的驗證指標與失效條件。完成後會自動存在這台裝置，之後可用「論點追蹤」檢查。" },
+      d:"核心論點、三大支柱、反方論點、可量化的驗證指標與失效條件。完成後會自動儲存，之後可用「論點追蹤」檢查。" },
     { k:"thesis-tracker", g:"stock", t:"論點追蹤", need:"thesis", eta:"約 1–2 分鐘",
       d:"拿你先前建立的投資論點，比對最新數據與新聞，檢查每個支柱是否還成立、有沒有觸發失效條件。" },
     { k:"sector", g:"sector", t:"產業分析", need:"arg", eta:"約 1–2 分鐘", argHint:"產業，例如：半導體、重電、AI 伺服器",
@@ -1965,14 +2031,15 @@
   function saveCmdHist(it){
     var list=[it].concat(loadCmdHist()).slice(0,10);
     while(list.length){
-      try{ localStorage.setItem("skyline_cmd_hist", JSON.stringify(list)); return; }catch(e){ list.pop(); }
+      try{ localStorage.setItem("skyline_cmd_hist", JSON.stringify(list)); }catch(e){ list.pop(); continue; }
+      syncTouch("skyline_cmd_hist"); return;
     }
   }
   function renderCmdHist(){
     var list=loadCmdHist();
     if(!list.length){ $("cmdHist").innerHTML=""; return; }
     $("cmdHist").innerHTML =
-      '<div class="cmd-hist-head"><p class="field-label" style="margin:0;">研究紀錄（存在這台裝置）</p><button class="link-btn" id="cmdHistClear">清除</button></div>'
+      '<div class="cmd-hist-head"><p class="field-label" style="margin:0;">研究紀錄（'+(sync.code ? '已同步到雲端' : '存在這台裝置')+'）</p><button class="link-btn" id="cmdHistClear">清除</button></div>'
       + '<div class="rank-list">' + list.map(function(it){
           return '<div class="rank-row" data-id="'+escAttr(it.id)+'"><span class="rank-name"><b>'+esc(cmdDef(it.k).t)+'</b>　'+esc(cmdTarget(it))+'</span>'
             + '<span class="rank-metric">'+esc(mdhm(it.t))+'</span></div>';
@@ -2039,7 +2106,8 @@
   });
   $("cmdHist").addEventListener("click", function(e){
     if(e.target.id==="cmdHistClear"){
-      if(window.confirm("清除這台裝置上的所有研究紀錄？")){ try{ localStorage.removeItem("skyline_cmd_hist"); }catch(err){} renderCmdHist(); }
+      var ask = sync.code ? "清除所有研究紀錄？\n已開啟雲端同步，其他裝置上的研究紀錄也會一起清除。" : "清除這台裝置上的所有研究紀錄？";
+      if(window.confirm(ask)){ try{ localStorage.removeItem("skyline_cmd_hist"); }catch(err){} syncTouch("skyline_cmd_hist"); renderCmdHist(); }
       return;
     }
     var r=e.target.closest(".rank-row"); if(!r) return;
@@ -3222,6 +3290,262 @@
     window.addEventListener("appinstalled", function(){ deferred=null; btn.hidden=true; });
   })();
 
+  // ---------- 雲端同步（Cloudflare D1，/api/sync）----------
+  // 同步的是「你的資料」：自選股、最近查過、持股、價格警示、投資論點、研究紀錄、模擬交易、手續費方案。
+  // 主題、上次分頁、自動更新、通知這些「裝置偏好」不同步。
+  // 每個項目各自記錄最後修改時間；兩台裝置都改過同一項時，以較新的為準。
+  // 資料一樣先存在這台裝置（離線也能用），有網路時自動上傳／下載。
+  var SYNC_KEYS=["skyline_watch","skyline_recent","skyline_hold","skyline_alerts","skyline_thesis","skyline_cmd_hist","skyline_sim","skyline_fee_plan"];
+  var SYNC_LABEL={ skyline_watch:"自選股", skyline_recent:"最近查過", skyline_hold:"持股", skyline_alerts:"價格警示",
+    skyline_thesis:"投資論點", skyline_cmd_hist:"研究紀錄", skyline_sim:"模擬交易", skyline_fee_plan:"手續費方案" };
+  var SYNC_ALPHA="0123456789ABCDEFGHJKMNPQRSTVWXYZ";   // Crockford Base32：沒有 I、L、O、U，不怕看錯
+  var SYNC_VALUE_MAX=1000000;                          // 和後端一樣：單一項目最多約 1MB
+  var sync={ code:"", meta:{ t:{}, dirty:{}, since:0 }, timer:null, busy:false, again:false, at:0, err:null, tooBig:[], pending:null, shown:false, holdUntil:0 };
+
+  function syncNorm(c){ return String(c||"").toUpperCase().replace(/[\s-]/g,"").replace(/O/g,"0").replace(/[IL]/g,"1"); }
+  function syncValid(c){ return /^[0-9A-HJKMNP-TV-Z]{20}$/.test(c); }
+  function syncFmt(c){ return c.replace(/(.{5})(?=.)/g,"$1-"); }
+  function syncNewCode(){
+    var b=new Uint8Array(20), c=""; crypto.getRandomValues(b);
+    for(var i=0;i<20;i++) c+=SYNC_ALPHA[b[i]&31];
+    return c;
+  }
+  function syncMetaLoad(){
+    var m=loadJSON("skyline_sync_meta", null);
+    if(!m || typeof m!=="object") m={};
+    if(!m.t || typeof m.t!=="object") m.t={};
+    if(!m.dirty || typeof m.dirty!=="object") m.dirty={};
+    if(!isFinite(m.since)) m.since=0;
+    return m;
+  }
+  function syncMetaSave(){ try{ localStorage.setItem("skyline_sync_meta", JSON.stringify(sync.meta)); }catch(e){} }
+  function syncDirtyKeys(){ return Object.keys(sync.meta.dirty); }
+  function syncErr(code, msg){ var e=new Error(msg); e.code=code; return e; }
+
+  // 本機的同步項目改了：記下修改時間、標成待上傳，1.5 秒後一起送（連續改動只送一次）
+  function syncTouch(k){
+    if(!sync || !sync.code || SYNC_KEYS.indexOf(k)<0) return;
+    sync.meta.t[k]=Date.now(); sync.meta.dirty[k]=1; syncMetaSave();
+    syncSoon(1500);
+  }
+  function syncSoon(ms){
+    if(!sync.code) return;
+    clearTimeout(sync.timer);
+    sync.timer=setTimeout(function(){ syncNow({ quiet:true }); }, ms);
+  }
+
+  function syncPost(body, keepalive){
+    var base=getBase();
+    if(!base) return Promise.reject(syncErr("nobase", "請先在上方「後端設定」填好 Worker 網址。"));
+    var payload=JSON.stringify(body);
+    return fetch(base+"/api/sync", { method:"POST", headers:{"Content-Type":"application/json"}, body:payload,
+      keepalive: !!keepalive && payload.length<60000 })                    // 關掉頁面時也盡量送出去（瀏覽器限 64KB）
+      .then(function(r){
+        return r.json().catch(function(){ return {}; }).then(function(j){
+          if(r.ok && j && j.ok) return j;
+          if(r.status===404) throw syncErr("old", "後端還沒更新到有雲端同步的版本，暫時無法同步。");
+          throw syncErr(j.code || ("http"+r.status), j.error || ("同步失敗（HTTP "+r.status+"）"));
+        });
+      }, function(){ throw syncErr("offline", "連不上後端，有網路時會自動再同步。"); });
+  }
+
+  // 套用雲端的版本。force：連結時選了「用雲端的資料」，不管本機有沒有改過都以雲端為準
+  function syncApply(items, force){
+    var changed=[], failed=false;
+    Object.keys(items||{}).forEach(function(k){
+      var it=items[k];
+      if(SYNC_KEYS.indexOf(k)<0 || !it || typeof it.v!=="string" || !isFinite(it.t)) return;
+      if(!force && sync.meta.dirty[k] && (sync.meta.t[k]||0)>=it.t) return;   // 這台裝置的改動比較新，等一下會上傳
+      var cur=lsGet(k), nv = it.v==="" ? null : it.v;                          // 空字串＝在別台裝置被清除了
+      if(cur!==nv){
+        try{ if(nv==null) localStorage.removeItem(k); else localStorage.setItem(k, nv); }
+        catch(e){ failed=true; return; }                                        // 這台裝置空間不夠：下次再抓一次
+        changed.push(k);
+      }
+      sync.meta.t[k]=it.t; delete sync.meta.dirty[k];
+    });
+    return { changed:changed, failed:failed };
+  }
+
+  // 別台裝置改了資料：重畫目前看得到的畫面（各畫面都是從 localStorage 重新讀）
+  function syncRefreshViews(keys){
+    function has(){ for(var i=0;i<arguments.length;i++) if(keys.indexOf(arguments[i])>=0) return true; return false; }
+    if(has("skyline_recent")) renderRecent();
+    if(has("skyline_watch")) renderWatch();
+    if(mode==="port" && has("skyline_watch","skyline_hold","skyline_alerts","skyline_fee_plan")) portEnter();
+    if(mode==="sim" && has("skyline_sim","skyline_fee_plan","skyline_watch")) simEnter();
+    if(mode==="cmd" && has("skyline_cmd_hist","skyline_thesis")) renderCmdHist();
+  }
+
+  // 一次請求：上傳這台裝置的改動，同時下載別台裝置的改動
+  function syncNow(opts){
+    opts=opts||{};
+    if(!sync.code) return Promise.resolve(false);
+    if(sync.busy){ sync.again=true; return Promise.resolve(false); }
+    clearTimeout(sync.timer);
+    var code=sync.code, items={}, sent={}, big=[];
+    syncDirtyKeys().forEach(function(k){
+      if(SYNC_KEYS.indexOf(k)<0){ delete sync.meta.dirty[k]; return; }
+      var v=lsGet(k); if(v==null) v="";
+      if(v.length>SYNC_VALUE_MAX){ big.push(k); return; }                       // 太大的先不送，其他照常同步
+      var t=sync.meta.t[k]||Date.now();
+      items[k]={ v:v, t:t }; sent[k]=t;
+    });
+    sync.tooBig=big; sync.busy=true;
+    if(!opts.quiet) syncShow("busy");
+    return syncPost({ code:code, since:sync.meta.since, items:items }, opts.keepalive)
+      .then(function(res){
+        if(sync.code!==code) return false;                                     // 同步途中按了停止同步
+        Object.keys(sent).forEach(function(k){ if(sync.meta.t[k]===sent[k]) delete sync.meta.dirty[k]; });   // 送出後沒再改的才算完成
+        var r=syncApply(res.items, false);
+        if(!r.failed) sync.meta.since=Math.max(0, (+res.now||0)-5000);         // 往前多抓 5 秒，避免同一瞬間別台裝置的寫入漏掉
+        sync.at=Date.now(); sync.err=null; syncMetaSave();
+        if(r.changed.length) syncRefreshViews(r.changed);
+        return true;
+      }, function(err){ sync.err=err; return false; })
+      .then(function(ok){
+        sync.busy=false; syncShow();
+        if(sync.again){ sync.again=false; syncSoon(300); }
+        else if(!ok && sync.code && syncDirtyKeys().length) syncSoon(30000);     // 沒送出去的改動，30 秒後再試
+        return ok;
+      });
+  }
+
+  function syncSay(msg, warn){ var m=$("syncMsg"); m.textContent=msg||""; m.className="cmd-hint"+(warn?" warn":""); }
+  function syncNote(msg){ syncSay(msg); sync.holdUntil=Date.now()+8000; }   // 成功訊息留 8 秒，不被背景同步的狀態蓋掉
+  function syncReveal(show){
+    sync.shown=!!show;
+    $("syncCodeShow").textContent = sync.code ? (sync.shown ? syncFmt(sync.code) : "•••••-•••••-•••••-•••••") : "";
+    $("syncRevealBtn").textContent = sync.shown ? "隱藏" : "顯示";
+  }
+  // 摘要列的狀態燈＋面板裡的說明
+  function syncShow(st){
+    var on=!!sync.code, cls="", t;
+    $("syncOff").hidden=on; $("syncOn").hidden=!on;
+    if(!on) t="未開啟";
+    else if(st==="busy"){ cls="busy"; t="同步中…"; }
+    else if(sync.err){ cls="bad"; t = sync.err.code==="offline" ? "離線，稍後自動同步" : "無法同步"; }
+    else if(sync.at){ cls="ok"; t="已同步 "+hhmm(sync.at); }
+    else { cls="busy"; t="準備同步…"; }
+    $("syncDot").className="sdot"+(cls ? " "+cls : "");
+    $("syncStat").textContent=t;
+    if(!on) return;
+    var msg="", warn=false;
+    if(sync.err){ msg=sync.err.message; warn=true; }
+    else if(sync.at) msg="最後同步 "+hhmm(sync.at)+"。資料改了會自動上傳；其他裝置打開網頁時，或大約一分鐘內就會更新。";
+    if(sync.tooBig.length){ msg+=(msg?" ":"")+"「"+sync.tooBig.map(function(k){ return SYNC_LABEL[k]||k; }).join("、")+"」超過 1MB，暫時沒有同步。"; warn=true; }
+    if(st!=="busy" && (warn || Date.now()>sync.holdUntil)) syncSay(msg, warn);
+  }
+  function syncStop(){
+    clearTimeout(sync.timer);
+    sync.code=""; sync.err=null; sync.at=0; sync.tooBig=[]; sync.meta={ t:{}, dirty:{}, since:0 };
+    try{ localStorage.removeItem("skyline_sync_code"); localStorage.removeItem("skyline_sync_meta"); }catch(e){}
+    syncReveal(false); syncShow();
+  }
+  // 這台裝置有沒有「值得保留」的資料（最近查過、手續費方案這種小東西不算）
+  function syncHasLocal(){
+    return ["skyline_watch","skyline_hold","skyline_alerts","skyline_thesis","skyline_cmd_hist","skyline_sim"].some(function(k){
+      var v=lsGet(k); return v!=null && v!=="" && v!=="[]" && v!=="{}";
+    });
+  }
+
+  // 第一台裝置：產生同步碼，把這台的資料全部上傳（沒有的項目也記一筆，別台裝置才找得到這組同步碼）
+  $("syncEnable").addEventListener("click", function(){
+    var btn=this;
+    if(!getBase()){ syncSay("請先在上方「後端設定」填好 Worker 網址。", true); return; }
+    var code=syncNewCode(), now=Date.now();
+    sync.code=code; sync.err=null; sync.at=0; sync.meta={ t:{}, dirty:{}, since:0 };
+    SYNC_KEYS.forEach(function(k){ sync.meta.t[k]=now; sync.meta.dirty[k]=1; });
+    btn.disabled=true; syncReveal(false); syncSay("建立中…");
+    syncNow().then(function(ok){
+      btn.disabled=false;
+      if(!ok){ var err=sync.err; syncStop(); syncSay((err && err.message) || "開啟失敗，請稍後再試。", true); return; }
+      try{ localStorage.setItem("skyline_sync_code", code); }catch(e){}
+      syncMetaSave(); syncReveal(true); syncShow();
+      syncNote("已開啟！請把上面的同步碼記下來（或按「複製」），在其他裝置輸入就能看到同一份資料。");
+    });
+  });
+
+  // 第二台以後的裝置：先確認雲端有這組同步碼的資料，兩邊都有資料時讓使用者選要留哪一份
+  $("syncLinkBtn").addEventListener("click", function(){
+    var btn=this, code=syncNorm($("syncCodeIn").value);
+    if(!syncValid(code)){ syncSay("同步碼是 20 碼英文和數字（例如 8KX2Q-MZ7RA-4TNVB-CW3PD），請再確認一次。", true); $("syncCodeIn").focus(); return; }
+    btn.disabled=true; syncSay("確認同步碼中…");
+    syncPost({ code:code, since:0, items:{} }).then(function(res){
+      btn.disabled=false;
+      var items=res.items||{};
+      if(!Object.keys(items).length){ syncSay("雲端上找不到這組同步碼的資料，請確認有沒有打錯。", true); return; }
+      sync.pending={ code:code, items:items, now:res.now };
+      if(syncHasLocal()){ $("syncChoice").hidden=false; syncSay(""); }
+      else syncFinishLink("cloud");
+    }, function(err){ btn.disabled=false; syncSay(err.message, true); });
+  });
+  function syncFinishLink(which){
+    var p=sync.pending; if(!p) return;
+    sync.pending=null; $("syncChoice").hidden=true; $("syncCodeIn").value="";
+    sync.code=p.code; sync.err=null; sync.at=0;
+    sync.meta={ t:{}, dirty:{}, since:Math.max(0, (+p.now||0)-5000) };
+    try{ localStorage.setItem("skyline_sync_code", p.code); }catch(e){}
+    var changed=[], now=Date.now();
+    if(which==="cloud"){
+      var r=syncApply(p.items, true); changed=r.changed;
+      if(r.failed) sync.meta.since=0;                                          // 有項目沒存進來：下次全部重抓
+      // 雲端沒有的項目（例如舊版沒同步過的）：用這台裝置的版本補上去
+      SYNC_KEYS.forEach(function(k){ if(!p.items[k] && lsGet(k)!=null){ sync.meta.t[k]=now; sync.meta.dirty[k]=1; } });
+    } else {
+      SYNC_KEYS.forEach(function(k){ sync.meta.t[k]=now; sync.meta.dirty[k]=1; });   // 這台的資料比雲端新，全部上傳
+    }
+    syncMetaSave();
+    if(changed.length) syncRefreshViews(changed);
+    syncReveal(false); syncShow();
+    syncNote(which==="cloud" ? "已連結！這台裝置現在顯示雲端上的資料。" : "已連結！雲端和其他裝置會換成這台裝置的資料。");
+    syncNow({ quiet:true });
+  }
+  $("syncUseCloud").addEventListener("click", function(){ syncFinishLink("cloud"); });
+  $("syncUseLocal").addEventListener("click", function(){
+    if(window.confirm("用這台裝置的資料覆蓋雲端？\n其他已同步的裝置也會換成這份資料。")) syncFinishLink("local");
+  });
+  $("syncCancel").addEventListener("click", function(){ sync.pending=null; $("syncChoice").hidden=true; syncSay(""); });
+  $("syncCodeIn").addEventListener("keydown", function(e){ if(e.key==="Enter") $("syncLinkBtn").click(); });
+
+  $("syncRevealBtn").addEventListener("click", function(){ syncReveal(!sync.shown); });
+  $("syncCopyBtn").addEventListener("click", function(){
+    if(!sync.code) return;
+    var b=this, t=syncFmt(sync.code);
+    function done(){ b.textContent="已複製 ✓"; setTimeout(function(){ b.textContent="複製"; },1600); }
+    if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done).catch(function(){ fallbackCopy(t); done(); });
+    else { fallbackCopy(t); done(); }
+  });
+  $("syncNowBtn").addEventListener("click", function(){ syncNow(); });
+  $("syncOffBtn").addEventListener("click", function(){
+    if(!window.confirm("這台裝置停止同步？\n資料會留在這台裝置，雲端上的資料不受影響；之後輸入同一組同步碼就能再連回來。")) return;
+    var stop=function(){ syncStop(); syncNote("這台裝置已停止同步。"); };
+    if(syncDirtyKeys().length) syncNow({ quiet:true }).then(stop); else stop();  // 還沒上傳的改動先送出去
+  });
+  $("syncWipeBtn").addEventListener("click", function(){
+    if(!window.confirm("刪除雲端上這組同步碼的所有資料？\n\n・這台裝置的資料會保留，並停止同步。\n・其他還在用這組同步碼的裝置，請也按「這台裝置停止同步」。\n・刪除後無法復原。")) return;
+    var b=this; b.disabled=true;
+    syncPost({ code:sync.code, wipe:true }).then(function(){
+      b.disabled=false; syncStop(); syncNote("雲端資料已刪除，這台裝置也已停止同步。");
+    }, function(err){ b.disabled=false; syncSay(err.message, true); });
+  });
+
+  // 什麼時候同步：打開網頁、回到這個分頁、恢復網路、看得到網頁時每分鐘一次；離開分頁時把還沒送出的改動送出去
+  setInterval(function(){ if(sync.code && !document.hidden) syncNow({ quiet:true }); }, 60000);
+  document.addEventListener("visibilitychange", function(){
+    if(!sync.code) return;
+    if(document.hidden){ if(syncDirtyKeys().length) syncNow({ quiet:true, keepalive:true }); }
+    else if(Date.now()-sync.at>10000) syncNow({ quiet:true });
+  });
+  window.addEventListener("online", function(){ if(sync.code) syncNow({ quiet:true }); });
+  function syncInit(){
+    sync.meta=syncMetaLoad();
+    var c=syncNorm(lsGet("skyline_sync_code")||"");
+    sync.code=syncValid(c) ? c : "";
+    syncReveal(false); syncShow();
+    if(sync.code) syncNow({ quiet:true });
+  }
+
   // ---------- 初始化 ----------
   renderRecent();
   renderWatch();
@@ -3239,6 +3563,7 @@
       qEl.focus();
     }
   })();
+  syncInit();
 
 })();
 </script>

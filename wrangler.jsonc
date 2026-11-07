@@ -14,5 +14,10 @@
 	"rules": [
 		{ "type": "Data", "globs": ["**/*.png"], "fallthrough": true },
 		{ "type": "Text", "globs": ["**/*.svg", "**/*.webmanifest", "**/sw.js"], "fallthrough": true }
+	],
+	// 雲端同步用的 Cloudflare D1 資料庫。沒有填 database_id：部署時 wrangler 會找名為 stock-db 的資料庫，
+	// 找不到就自動建立；之後的部署沿用同一個。資料表由 worker.js 第一次用到時自動建立。
+	"d1_databases": [
+		{ "binding": "DB", "database_name": "stock-db" }
 	]
 }
