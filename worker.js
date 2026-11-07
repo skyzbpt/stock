@@ -11,6 +11,7 @@
  *   GET  /api/screen            → 全市場掃描（市場雷達五份榜單，目前只含上市）
  *   GET  /api/debug             → 逐一檢查每個證交所／櫃買中心資料源是否正常（部署後先打這支確認）
  *   POST /api/analyze | /api/news | /api/command → 呼叫 Claude
+ *   POST /api/sync              → 雲端同步：自選股、持股、價格警示、模擬交易、研究紀錄存到 Cloudflare D1
  *
  * 證交所資料來源（上市）：
  *   - OpenAPI（openapi.twse.com.tw/v1）：每日收盤、估值、月營收、EPS、股利、融資融券、重大訊息、大盤
@@ -28,6 +29,10 @@
  * 為什麼要有這個後端：
  *   1. 證交所 API 從瀏覽器直接打會有 CORS 問題；從 Worker（伺服器端）打沒有這個限制，還能快取。
  *   2. Anthropic API 金鑰不能放在前端；放在 Worker 的加密環境變數才安全，且能部署到 GitHub Pages。
+ *
+ * 雲端同步（Cloudflare D1）：
+ *   - wrangler.jsonc 綁定 D1 資料庫 DB（stock-db）；部署時若還沒有這個資料庫，wrangler 會自動建立，資料表由程式自動建立
+ *   - 不用帳號密碼：每台裝置用同一組「同步碼」就能看到同一份資料；資料庫只存同步碼的雜湊，不存同步碼本身
  *
  * 部署後要做：
  *   - 設定密鑰：wrangler secret put ANTHROPIC_API_KEY   （或在 Dashboard → Settings → Variables 加密變數）
@@ -58,6 +63,74 @@ const STATIC_FILES = {
   "/manifest.webmanifest":  [MANIFEST, "application/manifest+json; charset=utf-8", "no-cache"],
   "/sw.js":                 [SW_JS, "text/javascript; charset=utf-8", "no-cache"]
 };
+
+// ---- 雲端同步（Cloudflare D1）----
+// 只同步使用者自己的資料；主題、上次分頁、自動更新開關這些「裝置偏好」留在各自裝置
+const SYNC_KEYS = new Set(["skyline_watch", "skyline_recent", "skyline_hold", "skyline_alerts",
+  "skyline_thesis", "skyline_cmd_hist", "skyline_sim", "skyline_fee_plan"]);
+const SYNC_VALUE_MAX = 1000000;                    // 單一項目上限約 1MB（D1 單列上限 2MB）
+const SYNC_CODE_RE = /^[0-9A-HJKMNP-TV-Z]{20}$/;    // 20 碼 Crockford Base32（100 bits 隨機），去掉易混淆的 I L O U
+let syncSchema = null;
+
+function syncNormalize(code) {
+  return String(code || "").toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+}
+// 資料庫只存同步碼的 SHA-256，就算資料表外流也拿不到可用的同步碼
+async function syncSpaceId(code) {
+  const c = syncNormalize(code);
+  if (!SYNC_CODE_RE.test(c)) return null;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("skyline-sync:" + c));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+// 第一次用到時自動建立資料表（每個 Worker 執行個體只做一次）
+function syncReady(db) {
+  if (!syncSchema) {
+    syncSchema = db.prepare("CREATE TABLE IF NOT EXISTS sync_items (space TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, " +
+      "t INTEGER NOT NULL, u INTEGER NOT NULL, PRIMARY KEY (space, k))").run()
+      .catch((e) => { syncSchema = null; throw e; });
+  }
+  return syncSchema;
+}
+// 一次請求同時「上傳本機改動」和「下載其他裝置的改動」
+//   請求：{ code, since, items: { key: { v: 字串（空字串＝已刪除）, t: 本機修改時間 ms } }, wipe? }
+//   回應：{ ok, now, items: { key: { v, t } } } ← since 之後別的裝置改過的項目
+// 同一個項目兩邊都改過時，以修改時間較新的為準
+async function handleSync(env, body) {
+  if (!env.DB) return json({ error: "雲端資料庫還沒準備好（Worker 沒有綁定 D1 資料庫 DB）", code: "no_db" }, 503);
+  const space = await syncSpaceId(body && body.code);
+  if (!space) return json({ error: "同步碼格式不對（應該是 20 碼英數字）", code: "bad_code" }, 400);
+  await syncReady(env.DB);
+
+  if (body.wipe === true) {
+    await env.DB.prepare("DELETE FROM sync_items WHERE space = ?1").bind(space).run();
+    return json({ ok: true, wiped: true });
+  }
+
+  const now = Date.now();
+  const items = body.items && typeof body.items === "object" && !Array.isArray(body.items) ? body.items : {};
+  const pushed = {};
+  const stmts = [];
+  for (const [k, it] of Object.entries(items)) {
+    if (!SYNC_KEYS.has(k) || !it || typeof it.v !== "string" || !Number.isFinite(it.t)) continue;
+    if (it.v.length > SYNC_VALUE_MAX) return json({ error: "「" + k + "」資料太大，無法同步", code: "too_large", key: k }, 413);
+    const t = Math.max(0, Math.min(Math.floor(it.t), now + 60000));   // 裝置時鐘快太多時，最多只認到現在＋1 分鐘
+    pushed[k] = t;
+    stmts.push(env.DB.prepare(
+      "INSERT INTO sync_items (space, k, v, t, u) VALUES (?1, ?2, ?3, ?4, ?5) " +
+      "ON CONFLICT(space, k) DO UPDATE SET v = excluded.v, t = excluded.t, u = excluded.u WHERE excluded.t > sync_items.t"
+    ).bind(space, k, it.v, t, now));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+
+  const since = Number.isFinite(body.since) ? body.since : 0;
+  const rows = await env.DB.prepare("SELECT k, v, t FROM sync_items WHERE space = ?1 AND u > ?2").bind(space, since).all();
+  const out = {};
+  for (const r of rows.results || []) {
+    if (pushed[r.k] === r.t) continue;               // 剛上傳成功的項目，裝置本來就有，不用再傳回去
+    out[r.k] = { v: r.v, t: r.t };
+  }
+  return json({ ok: true, now, items: out });
+}
 
 const ANTHROPIC_MODEL   = "claude-sonnet-4-6";        // 想更快、更省成本可改 "claude-haiku-4-5-20251001"
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -1787,6 +1860,12 @@ export default {
         return json(await analyze(env, body));
       }
 
+      if (url.pathname === "/api/sync" && request.method === "POST") {
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") return json({ error: "請求格式不對" }, 400);
+        return await handleSync(env, body);
+      }
+
       if (url.pathname === "/api/news" && request.method === "POST") {
         if (!env.ANTHROPIC_API_KEY) return json({ error: "伺服器尚未設定 ANTHROPIC_API_KEY 密鑰" }, 500);
         const body = await request.json().catch(() => ({}));
@@ -1803,7 +1882,7 @@ export default {
         return new Response(file[0], { headers: { "Content-Type": file[1], "Cache-Control": file[2] } });
       }
       if (url.pathname === "/api") {
-        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/quotes?codes=2330,6488,0050", "GET /api/intraday?codes=2330,0050", "GET /api/screen", "GET /api/debug[?code=2330&otc=6488 | ?ds=t86&code=2330]", "POST /api/analyze", "POST /api/news", "POST /api/command"] });
+        return json({ name: "台股天際線 API", routes: ["GET /api/stock?code=2330", "GET /api/extra?code=2330", "GET /api/quotes?codes=2330,6488,0050", "GET /api/intraday?codes=2330,0050", "GET /api/screen", "GET /api/debug[?code=2330&otc=6488 | ?ds=t86&code=2330]", "POST /api/analyze", "POST /api/news", "POST /api/command", "POST /api/sync"] });
       }
       return json({ error: "Not found" }, 404);
     } catch (e) {
