@@ -417,6 +417,40 @@
     .spinner{animation-duration:1.4s;}
     .sk{animation:none;background:var(--mist);}
   }
+
+  /* ---------- UI/UX 優化 ---------- */
+  html{scroll-padding-top:72px;}
+  :focus-visible{outline:2.5px solid var(--sky);outline-offset:2px;border-radius:8px;}
+  .search-input:focus-visible,.cfg-input:focus-visible{outline:none;}
+  .mode-tabs{position:sticky;top:8px;z-index:20;backdrop-filter:saturate(1.4) blur(8px);-webkit-backdrop-filter:saturate(1.4) blur(8px);
+    background:rgba(240,247,251,.92);}
+  .mode-tab{display:inline-flex;align-items:center;justify-content:center;gap:6px;}
+  .mode-tab:hover:not(.active){color:var(--sky-deep);background:rgba(255,255,255,.6);}
+  .mt-ic{width:17px;height:17px;flex:0 0 17px;}
+  details.port-note summary{cursor:pointer;list-style:none;font-weight:600;color:var(--sky-deep);display:flex;align-items:center;gap:6px;}
+  details.port-note summary::-webkit-details-marker{display:none;}
+  details.port-note summary::before{content:"ⓘ";font-size:13px;}
+  details.port-note summary::after{content:"展開";margin-left:auto;font-size:11.5px;color:var(--faint);font-weight:500;}
+  details.port-note[open] summary{margin-bottom:6px;}
+  details.port-note[open] summary::after{content:"收合";}
+  .kbd-tip{display:inline-block;font-family:var(--font-disp);font-size:11px;color:var(--faint);border:1px solid var(--line);
+    border-radius:5px;padding:0 5px;margin-left:6px;vertical-align:1px;}
+  @media (hover:none){.kbd-tip{display:none;}}
+  @media (max-width:560px){
+    .brand-sub{display:none;}
+    .horizon{display:none;}
+    .app{padding-bottom:calc(96px + env(safe-area-inset-bottom));}
+    /* 手機：分頁改成底部導覽列，單手好按 */
+    .mode-tabs{position:fixed;left:0;right:0;bottom:0;top:auto;margin:0;border-radius:16px 16px 0 0;border-width:1px 0 0;
+      padding:6px 6px calc(6px + env(safe-area-inset-bottom));gap:2px;overflow:visible;background:rgba(255,255,255,.94);
+      box-shadow:0 -8px 24px -12px rgba(3,105,161,.25);}
+    .mode-tab{flex:1 1 0;flex-direction:column;gap:3px;padding:6px 2px;font-size:11px;min-height:52px;}
+    .mode-tab .lf{display:none;}
+    .mode-tab .ls{display:inline;}
+    .mode-tab.active{background:var(--mist-2);box-shadow:none;}
+    .mt-ic{width:21px;height:21px;}
+  }
+  @media (max-width:360px){ .mode-tab{font-size:11px;} }
 </style>
 </head>
 <body>
@@ -462,17 +496,17 @@
   </div>
 
   <section class="panel">
-    <div class="mode-tabs" id="modeTabs">
-      <button class="mode-tab active" data-mode="stock"><span class="lf">個股分析</span><span class="ls">個股</span></button>
-      <button class="mode-tab" data-mode="radar"><span class="lf">市場雷達</span><span class="ls">雷達</span></button>
-      <button class="mode-tab" data-mode="cmd"><span class="lf">研究指令</span><span class="ls">指令</span></button>
-      <button class="mode-tab" data-mode="port"><span class="lf">自選持股</span><span class="ls">持股</span></button>
-      <button class="mode-tab" data-mode="sim"><span class="lf">模擬交易</span><span class="ls">模擬</span></button>
+    <div class="mode-tabs" id="modeTabs" role="tablist" aria-label="功能分頁">
+      <button class="mode-tab active" data-mode="stock" role="tab"><svg class="mt-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15l3-4 3 2 5-6"/></svg><span class="lf">個股分析</span><span class="ls">個股</span></button>
+      <button class="mode-tab" data-mode="radar" role="tab"><svg class="mt-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/><path d="M12 12l5.5-5.5"/></svg><span class="lf">市場雷達</span><span class="ls">雷達</span></button>
+      <button class="mode-tab" data-mode="cmd" role="tab"><svg class="mt-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h9l3 3v13H6z"/><path d="M9 11h6M9 15h4"/></svg><span class="lf">研究指令</span><span class="ls">指令</span></button>
+      <button class="mode-tab" data-mode="port" role="tab"><svg class="mt-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16.4 7.2 18.9l.9-5.4L4.2 9.7l5.4-.8z"/></svg><span class="lf">自選持股</span><span class="ls">持股</span></button>
+      <button class="mode-tab" data-mode="sim" role="tab"><svg class="mt-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17l-3-3 3-3"/><path d="M4 14h11"/><path d="M17 7l3 3-3 3"/><path d="M20 10H9"/></svg><span class="lf">模擬交易</span><span class="ls">模擬</span></button>
     </div>
 
     <div id="modeStock">
     <p class="panel-lead">輸入上市或上櫃股票，先<b>秒讀證交所／櫃買中心即時數據</b>，再交給 Claude 依這些真實數字做精準分析。</p>
-    <p class="field-label">分析標的</p>
+    <p class="field-label">分析標的<span class="kbd-tip" title="按 / 快速輸入">/</span></p>
     <div class="search-row">
       <input id="q" class="search-input" type="text" inputmode="numeric" placeholder="輸入股票代號，例如 2330、6488" autocomplete="off" aria-label="股票代號" />
       <button id="go" class="btn btn-primary">秒讀＋分析</button>
@@ -557,7 +591,7 @@
           <button class="btn-sm primary" id="hAdd">加入／更新</button>
         </div>
         <div class="cmd-hint" id="hMsg">同一檔再加入一次，會用新的股數與成本覆蓋原本的紀錄。</div>
-        <div class="port-note">怎麼算：市值＝現價×股數；未實現損益＝市值－買進成本－預估賣出費用。賣出費用以手續費加證交稅估算，手續費預設用新光證券舊戶電子下單（0.1425% 打 2.8 折，整股最低 20 元、零股最低 1 元；可在「模擬交易」的帳戶設定改成別的方案），一般股票 0.3%、代號 00 開頭的 ETF 0.1%，債券 ETF（代號結尾是 B，例如 00679B）目前免證交稅。買進手續費請自行併入每股成本；還沒有成交價時以昨收價估算。數字僅供參考，實際以券商對帳單為準。</div>
+        <details class="port-note"><summary>損益怎麼算？</summary>怎麼算：市值＝現價×股數；未實現損益＝市值－買進成本－預估賣出費用。賣出費用以手續費加證交稅估算，手續費預設用新光證券舊戶電子下單（0.1425% 打 2.8 折，整股最低 20 元、零股最低 1 元；可在「模擬交易」的帳戶設定改成別的方案），一般股票 0.3%、代號 00 開頭的 ETF 0.1%，債券 ETF（代號結尾是 B，例如 00679B）目前免證交稅。買進手續費請自行併入每股成本；還沒有成交價時以昨收價估算。數字僅供參考，實際以券商對帳單為準。</details>
       </div>
     </div>
 
@@ -638,7 +672,7 @@
           <button class="btn-sm ghost" id="simReset">重設帳戶</button>
         </div>
         <div class="cmd-hint" id="simSetMsg">重設帳戶會清空模擬持股、委託與成交紀錄，並以填入的起始資金重新開始。</div>
-        <div class="port-note">撮合規則：盤中（週一至週五 09:00–13:35）以即時成交價模擬成交；非交易時間以最近收盤價成交，方便隨時練習。市價單立即成交；限價單在價格到了才成交（買進：現價小於或等於限價；賣出：現價大於或等於限價），成交價取當時現價，會一直有效到成交或取消。限價要符合台股升降單位，並在漲跌停（昨收 ±10%）範圍內。費用：手續費 0.1425% 乘上券商折扣，預設新光證券舊戶電子下單 2.8 折（整股最低 20 元、零股最低 1 元，當日折讓），可在上面改成 6 折或原價；賣出另扣證交稅：一般股票 0.3%、ETF 0.1%、債券 ETF 免稅。<br>放空（融券）：以「張」為單位；放空時先付成交金額 9 成的保證金，賣出所得扣掉手續費、證交稅與借券費（0.08%）後存成擔保品；回補（買回還券）時保證金和擔保品一起退還，再扣掉買回金額與手續費，就是這筆損益。股價漲越多，放空賠越多。維持率＝（保證金＋擔保品）÷（現價×股數），低於 130% 時真實市場會被追繳保證金、甚至強制回補，這裡只提醒不會自動回補。沒有模擬平盤以下不得放空、券源不足、股東會與除權息前的強制回補、融資、當沖與漲跌停排隊等細節，結果僅供練習。</div>
+        <details class="port-note"><summary>撮合規則與費用說明</summary>撮合規則：盤中（週一至週五 09:00–13:35）以即時成交價模擬成交；非交易時間以最近收盤價成交，方便隨時練習。市價單立即成交；限價單在價格到了才成交（買進：現價小於或等於限價；賣出：現價大於或等於限價），成交價取當時現價，會一直有效到成交或取消。限價要符合台股升降單位，並在漲跌停（昨收 ±10%）範圍內。費用：手續費 0.1425% 乘上券商折扣，預設新光證券舊戶電子下單 2.8 折（整股最低 20 元、零股最低 1 元，當日折讓），可在上面改成 6 折或原價；賣出另扣證交稅：一般股票 0.3%、ETF 0.1%、債券 ETF 免稅。<br>放空（融券）：以「張」為單位；放空時先付成交金額 9 成的保證金，賣出所得扣掉手續費、證交稅與借券費（0.08%）後存成擔保品；回補（買回還券）時保證金和擔保品一起退還，再扣掉買回金額與手續費，就是這筆損益。股價漲越多，放空賠越多。維持率＝（保證金＋擔保品）÷（現價×股數），低於 130% 時真實市場會被追繳保證金、甚至強制回補，這裡只提醒不會自動回補。沒有模擬平盤以下不得放空、券源不足、股東會與除權息前的強制回補、融資、當沖與漲跌停排隊等細節，結果僅供練習。</details>
       </div>
     </div>
   </section>
@@ -1440,11 +1474,37 @@
     portTimerSync();
     simTimerSync();
     var tabs = document.querySelectorAll("#modeTabs .mode-tab");
-    for(var i=0;i<tabs.length;i++) tabs[i].classList.toggle("active", tabs[i].getAttribute("data-mode")===m);
+    for(var i=0;i<tabs.length;i++){
+      var on = tabs[i].getAttribute("data-mode")===m;
+      tabs[i].classList.toggle("active", on);
+      tabs[i].setAttribute("aria-selected", on ? "true" : "false");
+      tabs[i].tabIndex = on ? 0 : -1;
+    }
+    lsSet("skyline_mode", m);
   }
   $("modeTabs").addEventListener("click", function(e){
     var b = e.target.closest(".mode-tab"); if(!b) return;
-    setMode(b.getAttribute("data-mode"));
+    var m = b.getAttribute("data-mode");
+    if(m===mode) return;
+    setMode(m);
+    // 切換分頁後回到面板頂端，避免停在上一頁的半路
+    var panel = $("modeTabs").closest(".panel");
+    if(panel && panel.getBoundingClientRect().top < 0) panel.scrollIntoView({behavior:"smooth", block:"start"});
+  });
+  // 鍵盤：左右鍵切換分頁
+  $("modeTabs").addEventListener("keydown", function(e){
+    if(e.key!=="ArrowRight" && e.key!=="ArrowLeft") return;
+    var tabs = Array.prototype.slice.call(document.querySelectorAll("#modeTabs .mode-tab"));
+    var i = tabs.indexOf(document.activeElement); if(i<0) return;
+    var n = tabs[(i + (e.key==="ArrowRight"?1:tabs.length-1)) % tabs.length];
+    n.focus(); n.click(); e.preventDefault();
+  });
+  // 鍵盤：按 / 直接跳到股票代號輸入框
+  document.addEventListener("keydown", function(e){
+    if(e.key!=="/" || e.ctrlKey || e.metaKey || e.altKey) return;
+    var t = e.target.tagName; if(t==="INPUT"||t==="TEXTAREA"||t==="SELECT"||e.target.isContentEditable) return;
+    if(mode!=="stock") setMode("stock");
+    $("q").focus(); e.preventDefault();
   });
 
   // ---------- 市場雷達 ----------
@@ -3044,11 +3104,15 @@
   renderRecent();
   renderWatch();
   setScen("overview");
+  var savedMode = lsGet("skyline_mode");
+  setMode("stock");
   (function initHash(){
     var h=(location.hash||"").replace("#","").trim().toUpperCase();
     if(/^\d{4,6}[A-Z]?$/.test(h)){
       qEl.value=h;
       if(getBase()) runFull(h, true);
+    } else if(/^(radar|cmd|port|sim)$/.test(savedMode||"")){
+      setMode(savedMode);
     } else if(window.matchMedia && window.matchMedia("(pointer: fine)").matches){
       qEl.focus();
     }
