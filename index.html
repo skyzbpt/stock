@@ -9,6 +9,11 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml" />
 <link rel="icon" href="icon-512.png" type="image/png" sizes="512x512" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="台股天際線" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <title>台股天際線 · 秒讀 AI 分析</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -518,6 +523,12 @@
     color:var(--sky-deep);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
   .theme-btn:hover{border-color:var(--sky-bright);}
   .theme-btn svg{width:17px;height:17px;}
+  .install-btn{font-family:var(--font-disp);font-size:12.5px;font-weight:600;color:#fff;background:var(--sky);border:none;
+    border-radius:999px;padding:8px 13px;cursor:pointer;white-space:nowrap;}
+  .install-btn:hover{background:#0284C7;}
+  .install-btn[hidden]{display:none;}
+  @media (display-mode:standalone){ .live-pill{display:none;} }
+  @media (max-width:420px){ .top-right:has(.install-btn:not([hidden])) .live-pill{display:none;} }
   .top-right{display:flex;align-items:center;gap:8px;}
 </style>
 </head>
@@ -538,7 +549,7 @@
         <div class="brand-sub">秒讀上市櫃數據 · Claude 精準分析</div>
       </div>
     </div>
-    <div class="top-right"><span class="live-pill"><span class="live-dot"></span>直連 TWSE · TPEx</span><button class="theme-btn" id="themeBtn" type="button" aria-label="切換外觀"></button></div>
+    <div class="top-right"><span class="live-pill"><span class="live-dot"></span>直連 TWSE · TPEx</span><button class="install-btn" id="installBtn" type="button" hidden>安裝 App</button><button class="theme-btn" id="themeBtn" type="button" aria-label="切換外觀"></button></div>
   </header>
 
   <details class="cfg" id="cfg">
@@ -3186,6 +3197,21 @@
     btn.addEventListener("click",function(){
       cur=order[(order.indexOf(cur)+1)%order.length]; lsSet("skyline_theme",cur); apply(cur);
     });
+  })();
+
+  // ---------- PWA：安裝到主畫面 ----------
+  (function(){
+    if("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
+      window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
+    }
+    var deferred=null, btn=$("installBtn");
+    window.addEventListener("beforeinstallprompt", function(e){ e.preventDefault(); deferred=e; btn.hidden=false; });
+    btn.addEventListener("click", function(){
+      if(!deferred) return;
+      deferred.prompt();
+      deferred.userChoice.finally(function(){ deferred=null; btn.hidden=true; });
+    });
+    window.addEventListener("appinstalled", function(){ deferred=null; btn.hidden=true; });
   })();
 
   // ---------- 初始化 ----------
