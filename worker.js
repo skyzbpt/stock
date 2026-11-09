@@ -455,8 +455,15 @@ function parseMis(m) {
   if (!m || !m.c) return null;
   const y = num(m.y);
   let z = num(m.z), approx = false;
-  // 這 5 秒內剛好沒成交時 z 會是 "-"：開盤後改用最佳買價（沒有就最佳賣價）暫代
-  if (z == null && num(m.o) != null) {
+  // 這 5 秒內剛好沒成交時 z 會是 "-"。改用真實的最近一筆成交價：
+  //   trade.z（最近成交明細）→ pz（上一筆成交價）；以前直接拿最佳買價暫代，
+  //   買賣價差大或冷門股時會跟實際成交價差好幾檔，造成「即時股價有誤」
+  //   只在今天已開盤（有開盤價）時才這樣補，盤前照樣回 null 顯示「尚未開盤」
+  const opened = num(m.o) != null;
+  if (z == null && opened) z = num(m.trade && m.trade.z);
+  if (z == null && opened) z = num(m.pz);
+  // 上面都沒有（極少見）才用最佳買價（沒有就最佳賣價）暫代，並標「約」
+  if (z == null && opened) {
     const first = (s) => num(String(s || "").split("_")[0]);
     z = first(m.b);
     if (z == null) z = first(m.a);
@@ -481,7 +488,7 @@ async function fetchRealtime(code) {
     try {
       const res = await fetch(MIS_URL + "?ex_ch=" + ex + "_" + code + ".tw&json=1&delay=0", {
         headers: MIS_HEADERS,
-        cf: { cacheTtl: 30, cacheEverything: true },
+        cf: { cacheTtl: 5, cacheEverything: true },  // 個股頁也要接近即時，邊緣快取只留 5 秒（和多檔報價一致）
         signal: AbortSignal.timeout(RT_TIMEOUT_MS)
       });
       if (!res.ok) continue;
