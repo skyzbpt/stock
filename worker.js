@@ -483,27 +483,64 @@ function parseMis(m) {
   };
 }
 
+// 證交所即時行情偶爾會卡住好幾秒不回應。以前等 5 秒逾時就放棄，個股頁會悄悄退回舊的收盤價。
+// 現在：1.2 秒還沒回應（或失敗）就再發一次，誰先成功用誰；兩次都失敗回 null，由呼叫端改用備援來源
+const MIS_TRY_MS = 3500, MIS_HEDGE_MS = 1200;
+async function misOnce(exCh, n) {
+  const res = await fetch(MIS_URL + "?ex_ch=" + exCh + "&json=1&delay=0" + (n ? "&_=" + n : ""), {
+    headers: MIS_HEADERS,
+    cf: { cacheTtl: 5, cacheEverything: true },  // 邊緣快取只留 5 秒，接近即時
+    signal: AbortSignal.timeout(MIS_TRY_MS)
+  });
+  if (!res.ok) throw new Error("MIS " + res.status);
+  const j = await res.json().catch(() => null);  // 被限流時會回 HTML
+  if (!j || !Array.isArray(j.msgArray)) throw new Error("MIS 回傳格式不正確");
+  return j.msgArray;
+}
+function misFetch(exCh) {
+  const first = misOnce(exCh, 0);
+  const second = new Promise((resolve, reject) => {
+    let started = false;
+    const go = () => { if (started) return; started = true; misOnce(exCh, 1).then(resolve, reject); };
+    const t = setTimeout(go, MIS_HEDGE_MS);
+    first.then(() => { started = true; clearTimeout(t); reject(new Error("不需要")); }, () => { clearTimeout(t); go(); });
+  });
+  return Promise.any([first, second]).catch(() => null);
+}
+
+// 備援：證交所即時行情連不上時，改用 Yahoo 股市的報價（可能有延遲，回傳時標 delayed）
+async function fetchRealtimeBackup(code) {
+  const d = await fetchIntraday(code).catch(() => null);
+  if (!d || d.last == null || !/^\d{8}$/.test(d.date || "")) return null;
+  const y = d.prevClose, z = d.last;
+  return {
+    name: null, ex: d.ex, market: d.ex === "otc" ? "上櫃 (TPEx)" : "上市 (TWSE)",
+    date: d.date.slice(0, 4) + "-" + d.date.slice(4, 6) + "-" + d.date.slice(6), time: d.time || null,
+    approx: false, delayed: true,
+    close: z, open: d.open != null ? d.open : null, high: d.high != null ? d.high : null, low: d.low != null ? d.low : null,
+    prevClose: y,
+    change: y != null ? +(z - y).toFixed(2) : null,
+    changePct: y ? +((z - y) / y * 100).toFixed(2) : null,
+    volumeLots: d.volumeLots != null ? d.volumeLots : null
+  };
+}
+
+// 上市 tse_、上櫃 otc_ 兩個頻道合成一次請求（MIS 只會回存在的那一個），請求數減半、比較不會被限流
 async function fetchRealtime(code) {
-  for (const ex of ["tse", "otc"]) {
-    try {
-      const res = await fetch(MIS_URL + "?ex_ch=" + ex + "_" + code + ".tw&json=1&delay=0", {
-        headers: MIS_HEADERS,
-        cf: { cacheTtl: 5, cacheEverything: true },  // 個股頁也要接近即時，邊緣快取只留 5 秒（和多檔報價一致）
-        signal: AbortSignal.timeout(RT_TIMEOUT_MS)
-      });
-      if (!res.ok) continue;
-      const j = await res.json().catch(() => null);
-      const q = parseMis(j && Array.isArray(j.msgArray) && j.msgArray[0]);
-      if (!q || q.close == null) continue; // 尚無當盤成交（如未開盤），交給收盤資料處理
-      return q;
-    } catch (e) { /* 換下一個來源 */ }
+  const list = await misFetch("tse_" + code + ".tw|otc_" + code + ".tw");
+  if (list) {
+    for (const m of list) {
+      const q = parseMis(m);
+      if (q && q.close != null) return q;
+    }
+    return null; // 連得上但尚無當盤成交（如未開盤），交給收盤資料處理
   }
-  return null;
+  return fetchRealtimeBackup(code);
 }
 
 // ---- 多檔即時報價（/api/quotes：自選股行情、價格警示、持股損益共用）----
 // 每個代號的上市 tse_ 與上櫃 otc_ 頻道都問（MIS 只會回存在的那一個），所以不用先判斷市場；每 15 檔合併成一次請求
-const QUOTES_MAX = 30, QUOTES_CHUNK = 15, QUOTES_TIMEOUT_MS = 8000;
+const QUOTES_MAX = 30, QUOTES_CHUNK = 15;
 
 // 解析 ?codes=2330,6488,0050：去空白、轉大寫、去重複；格式不對或超過上限回 { error }
 function parseCodes(s) {
@@ -528,22 +565,28 @@ async function fetchQuotes(codes) {
   for (let i = 0; i < codes.length; i += QUOTES_CHUNK) chunks.push(codes.slice(i, i + QUOTES_CHUNK));
   const lists = await Promise.all(chunks.map(async (part) => {
     const exCh = part.map((c) => "tse_" + c + ".tw|otc_" + c + ".tw").join("|");
-    try {
-      const res = await fetch(MIS_URL + "?ex_ch=" + exCh + "&json=1&delay=0", {
-        headers: MIS_HEADERS,
-        cf: { cacheTtl: 5, cacheEverything: true },
-        signal: AbortSignal.timeout(QUOTES_TIMEOUT_MS)
-      });
-      if (!res.ok) return null;
-      const j = await res.json().catch(() => null);  // 被限流時會回 HTML
-      return j && Array.isArray(j.msgArray) ? j.msgArray : null;
-    } catch (e) { return null; }
+    return misFetch(exCh);  // 卡住會自動再試一次
   }));
   // 每一批都失敗才算整體失敗；只有部分失敗時，那幾檔列在 unavailable（不是查無此股，稍後重試即可）
-  if (lists.every((x) => x == null)) throw new Error("即時報價暫時無法取得（證交所即時行情連線失敗），請稍後再試");
-  const unavailable = [];
-  lists.forEach((x, i) => { if (x == null) unavailable.push(...chunks[i]); });
+  const failed = [];
+  lists.forEach((x, i) => { if (x == null) failed.push(...chunks[i]); });
   const quotes = {};
+  // 證交所那一批拿不到的代號，改問備援來源（Yahoo 股市，可能有延遲）；備援也沒有才列入 unavailable
+  const backups = await Promise.all(failed.map((c) => fetchRealtimeBackup(c).catch(() => null)));
+  const unavailable = [], t8 = ymdOf(twNow()), today = t8.slice(0, 4) + "-" + t8.slice(4, 6) + "-" + t8.slice(6);
+  backups.forEach((q, i) => {
+    const code = failed[i];
+    if (!q) { unavailable.push(code); return; }
+    // 備援拿到的若不是今天的成交（盤前、休市），當成「尚未開盤」：只留昨收，不當作現價
+    if (q.date !== today) { quotes[code] = { code, name: null, ex: q.ex, close: null, open: null, high: null, low: null,
+      prevClose: q.close, change: null, changePct: null, volumeLots: null, date: null, time: null, approx: false, delayed: true }; return; }
+    quotes[code] = {
+      code, name: null, ex: q.ex, close: q.close, open: q.open, high: q.high, low: q.low,
+      prevClose: q.prevClose, change: q.change, changePct: q.changePct, volumeLots: q.volumeLots,
+      date: q.date, time: q.time, approx: false, delayed: true
+    };
+  });
+  if (failed.length === codes.length && !Object.keys(quotes).length) throw new Error("即時報價暫時無法取得（證交所即時行情連線失敗），請稍後再試");
   for (const list of lists) for (const m of list || []) {
     const q = parseMis(m);
     const code = q ? String(m.c).trim().toUpperCase() : "";
@@ -572,6 +615,13 @@ async function yahooChart(sym) {
   const j = await res.json().catch(() => null);
   return (j && j.chart && Array.isArray(j.chart.result) && j.chart.result[0]) || null;
 }
+// Yahoo 的最後成交時間（秒）→ 台灣時間「HH:MM:SS」；13:30 以後一律記成 13:30:00（收盤）
+function yahooTime(sec) {
+  if (sec == null) return null;
+  const d = new Date((sec + 8 * 3600) * 1000);
+  const t = [d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()].map((x) => String(x).padStart(2, "0")).join(":");
+  return t >= "13:30:00" ? "13:30:00" : t;
+}
 async function fetchIntraday(code) {
   return memo("intraday:" + code, INTRADAY_TTL, async () => {
     for (const suf of [".TW", ".TWO"]) {
@@ -591,7 +641,13 @@ async function fetchIntraday(code) {
       const day = ts.length ? ymdOf(new Date((ts[ts.length - 1] + 8 * 3600) * 1000)) : "";
       return { code, ex: suf === ".TW" ? "tse" : "otc", prevClose: prev != null ? Math.round(prev * 100) / 100 : null,
         last: m.regularMarketPrice != null ? Math.round(m.regularMarketPrice * 100) / 100 : (pts.length ? pts[pts.length - 1][1] : null),
-        date: day, points: pts };
+        date: day, points: pts,
+        // 以下給「即時行情備援」用：當日開高低、成交張數、最後成交時間（台灣時間）
+        open: pts.length ? pts[0][1] : null,
+        high: m.regularMarketDayHigh != null ? Math.round(m.regularMarketDayHigh * 100) / 100 : null,
+        low: m.regularMarketDayLow != null ? Math.round(m.regularMarketDayLow * 100) / 100 : null,
+        volumeLots: m.regularMarketVolume != null ? Math.round(m.regularMarketVolume / 1000) : null,
+        time: yahooTime(m.regularMarketTime) };
     }
     return null;
   });
@@ -880,6 +936,7 @@ function applyRealtime(snap, rt, source) {
   snap.priceTime = rt.time;
   snap.priceLabel = rt.time === "13:30:00" ? "收盤" : "盤中即時";
   snap.source = source + " ＋ 即時行情快照";
+  if (rt.delayed) snap.notes.push("證交所即時行情暫時連不上，現價改用備援報價（Yahoo 股市），可能有數十秒到幾分鐘的延遲。");
   if (rt.approx) snap.notes.push("最近 5 秒內沒有成交，現價暫以最佳買價（或賣價）顯示。");
 }
 // 盤中／今日即時價還沒進日成交檔：補到走勢最後一點，讓 K 線圖與技術面看到今天
