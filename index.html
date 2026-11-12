@@ -752,7 +752,7 @@
       <p class="panel-lead">用<b>虛擬資金</b>練習買賣與<b>放空</b>台股：依即時報價模擬成交，手續費、證交稅、借券費照實扣。<b>不會真的下單</b>；紀錄存在這台裝置，開啟「雲端同步」就能帶到其他裝置。</p>
       <div class="port-tools">
         <button class="btn-sm primary" id="simRefresh">更新報價</button>
-        <button class="btn-sm ghost" id="simAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 5 秒更新報價並撮合委託（走勢圖每分鐘補一次分時資料）">自動更新：關</button>
+        <button class="btn-sm ghost" id="simAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 5 秒更新報價並撮合委託（走勢圖每 20 秒補一次分時資料）">自動更新：關</button>
         <span class="port-status" id="simStatus"></span>
       </div>
       <div id="simSum"></div>
@@ -3138,8 +3138,11 @@
       // 接上本機記錄的即時點：Yahoo 的點只留到第一個即時點之前
       var tk=(icTickLoad().c[w.c]||[]);
       if(tk.length && d.date===icTickLoad().day || (tk.length && !d.date)){
-        var yp=(d.points||[]).filter(function(p){ return p[0]<tk[0][0]; });
-        d={ code:d.code, prevClose:d.prevClose!=null ? d.prevClose : (q ? q.prevClose : null), last:d.last, date:icTickLoad().day, points:yp.concat(tk), live:tk[0][0] };
+        // 來源是證交所分時（src:"twse"）時整段都是即時的：只把比它更新的即時點接在後面
+        var tw=d.src==="twse", dp=d.points||[], lastT=dp.length ? dp[dp.length-1][0] : "";
+        var yp=tw ? dp : dp.filter(function(p){ return p[0]<tk[0][0]; });
+        var add=tw ? tk.filter(function(p){ return p[0]>lastT; }) : tk;
+        d={ code:d.code, prevClose:d.prevClose!=null ? d.prevClose : (q ? q.prevClose : null), last:d.last, date:icTickLoad().day, points:yp.concat(add), live:tw ? "" : tk[0][0] };
       }
       var lq=q;
       if(lq && lq.close!=null && lq.date && lq.date.replace(/-/g,"")>=(d.date||"")){
@@ -3188,7 +3191,7 @@
   function simTick(){
     if(mode!=="sim" || document.hidden || !isTradingTime()){ renderSimStatus(); return; }
     simRefresh();
-    if(Date.now()-ic.at>60000) icRefresh();
+    if(Date.now()-ic.at>20000) icRefresh();   // 走勢圖每 20 秒補一次證交所分時
   }
   function simTimerSync(){
     var want = mode==="sim" && lsGet("skyline_sim_auto")==="1";
