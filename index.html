@@ -2761,8 +2761,32 @@
       .forEach(function(c){ if(!seen[c]){ seen[c]=1; out.push(c); } });
     return out;
   }
+  // 走勢圖的即時點：Yahoo 的分時資料實測慢約 20 分鐘，所以每次收到證交所即時報價，
+  // 就把「今天、每分鐘最後一筆成交價」記在這台裝置（不上傳雲端），畫圖時接在 Yahoo 資料後面
+  var icTicks=null;
+  function icTickLoad(){
+    var day=twToday().replace(/-/g,"");
+    if(icTicks && icTicks.day===day) return icTicks;
+    icTicks={ day:day, c:{} };
+    try{ var j=JSON.parse(localStorage.getItem("skyline_ic_ticks")||"null"); if(j && j.day===day && j.c) icTicks=j; }catch(e){}
+    return icTicks;
+  }
+  function icTickAdd(quotes){
+    var T=icTickLoad(), dirty=false;
+    for(var c in quotes){
+      var q=quotes[c], tm=String(q.time||"").slice(0,5);
+      if(q.close==null || q.delayed || !q.date || q.date.replace(/-/g,"")!==T.day || !/^\d\d:\d\d$/.test(tm) || tm<"09:00" || tm>"13:30") continue;
+      var a=T.c[c]||(T.c[c]=[]), n=a.length;
+      if(n && a[n-1][0]===tm){ if(a[n-1][1]===q.close) continue; a[n-1][1]=q.close; }
+      else if(n && a[n-1][0]>tm) continue;   // 時間倒退（舊資料）不收
+      else a.push([tm, q.close]);
+      dirty=true;
+    }
+    if(dirty) try{ localStorage.setItem("skyline_ic_ticks", JSON.stringify(T)); }catch(e){}
+  }
   function simTakeQuotes(r){
     var now=Date.now();
+    icTickAdd(r.quotes||{});
     for(var k in r.quotes){ r.quotes[k]._at=now; sim.quotes[k]=r.quotes[k]; delete sim.missing[k]; }
     for(var m in r.missing) sim.missing[m]=1;
   }
@@ -2781,7 +2805,7 @@
       })
       .catch(function(err){ sim.err="報價讀取失敗："+err.message; })
       .then(function(){
-        sim.loading=false; renderSim();
+        sim.loading=false; renderSim(); renderIntraday();
         if(sim.again){ sim.again=false; simRefresh(); }
       });
   }
@@ -3105,12 +3129,18 @@
     var box=$("simCharts"), st=$("icStatus"), list=loadWatch();
     if(!list.length){ box.innerHTML='<div class="port-note">還沒有自選股。在個股頁按星號，或在上方「自選股」列加入後，這裡就會顯示每檔今天的走勢。</div>'; st.textContent=""; return; }
     if(!getBase()){ box.innerHTML='<div class="port-note">請先在上方「後端設定」貼上你的 Worker 網址。</div>'; st.textContent=""; return; }
-    var today=twToday().replace(/-/g,""), oldDay="";
+    var today=twToday().replace(/-/g,""), oldDay="", liveFrom="";
     box.innerHTML='<div class="sim-charts">'+list.slice(0,20).map(function(w){
       var q=sim.quotes[w.c], d=ic.data[w.c] || (q && q.close!=null ? { code:w.c, points:[], date:"" } : null);
       var name=esc(w.n || (q && q.name) || "");
       if(!d) return '<button type="button" class="ic-card" data-ic="'+escAttr(w.c)+'"><div class="ic-top"><span class="n">'+esc(w.c)+' '+name+'</span></div>'
         + '<div class="ic-empty">'+(ic.missing[w.c] ? "查無走勢" : (ic.loading || !ic.at ? "讀取中…" : "暫時無法取得"))+'</div></button>';
+      // 接上本機記錄的即時點：Yahoo 的點只留到第一個即時點之前
+      var tk=(icTickLoad().c[w.c]||[]);
+      if(tk.length && d.date===icTickLoad().day || (tk.length && !d.date)){
+        var yp=(d.points||[]).filter(function(p){ return p[0]<tk[0][0]; });
+        d={ code:d.code, prevClose:d.prevClose!=null ? d.prevClose : (q ? q.prevClose : null), last:d.last, date:icTickLoad().day, points:yp.concat(tk), live:tk[0][0] };
+      }
       var lq=q;
       if(lq && lq.close!=null && lq.date && lq.date.replace(/-/g,"")>=(d.date||"")){
         var tm=String(lq.time||"").slice(0,5), pts0=(lq.date.replace(/-/g,"")===d.date) ? (d.points||[]).slice() : [];
@@ -3120,6 +3150,7 @@
         d={ code:d.code, prevClose:lq.prevClose!=null ? lq.prevClose : d.prevClose, last:lq.close, date:lq.date.replace(/-/g,""), points:pts0 };
       }
       if(d.date && d.date!==today) oldDay=d.date;
+      if(d.live && (!liveFrom || d.live<liveFrom)) liveFrom=d.live;
       var last=d.last, pc=d.prevClose, chg=(last!=null && pc!=null) ? last-pc : null;
       var cls=chg>0 ? "up" : (chg<0 ? "down" : "");
       var pts=d.points||[];
@@ -3132,7 +3163,7 @@
     var t="";
     if(ic.loading) t="更新中…";
     else if(ic.err) t=ic.err;
-    else if(ic.at) t=hhmm(new Date(ic.at).toISOString())+" 更新"+(oldDay ? " · 今日未開盤，顯示 "+oldDay.slice(4,6)+"/"+oldDay.slice(6)+" 走勢" : "")+" · 灰色虛線為昨收";
+    else if(ic.at) t=hhmm(new Date(ic.at).toISOString())+" 更新"+(liveFrom ? " · "+liveFrom+" 起為即時記錄，之前的分時資料來源約慢 20 分鐘" : "")+(oldDay ? " · 今日未開盤，顯示 "+oldDay.slice(4,6)+"/"+oldDay.slice(6)+" 走勢" : "")+" · 灰色虛線為昨收";
     st.textContent=t;
     st.className="port-status"+(ic.err && !ic.loading ? " warn" : "");
   }
