@@ -3142,7 +3142,7 @@
         var tw=d.src==="twse", dp=d.points||[], lastT=dp.length ? dp[dp.length-1][0] : "";
         var yp=tw ? dp : dp.filter(function(p){ return p[0]<tk[0][0]; });
         var add=tw ? tk.filter(function(p){ return p[0]>lastT; }) : tk;
-        d={ code:d.code, prevClose:d.prevClose!=null ? d.prevClose : (q ? q.prevClose : null), last:d.last, date:icTickLoad().day, points:yp.concat(add), live:tw ? "" : tk[0][0] };
+        d={ code:d.code, prevClose:d.prevClose!=null ? d.prevClose : (q ? q.prevClose : null), last:d.last, date:icTickLoad().day, points:yp.concat(add), live:tw ? (d.live||"") : tk[0][0], src:d.src };
       }
       var lq=q;
       if(lq && lq.close!=null && lq.date && lq.date.replace(/-/g,"")>=(d.date||"")){
