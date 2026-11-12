@@ -1888,7 +1888,8 @@ async function sourceStatus(code, otcCode) {
 }
 
 // /api/debug?ds=t86&code=2330 → 看欄位名稱與該代號那一列原始資料（欄位改版時用）
-async function sourceSample(ds, code) {
+async function sourceSample(ds, code, probe) {
+  probe = probe || {};
   if (OPENAPI[ds] || (ds.indexOf("tp_") === 0 && TPEX_OPENAPI[ds.slice(3)])) {
     const j = OPENAPI[ds] ? await oa(ds, 60) : await tpOa(ds.slice(3), 60);
     if (!Array.isArray(j)) return { error: "fetch failed", type: typeof j };
@@ -1914,6 +1915,13 @@ async function sourceSample(ds, code) {
   if (ds === "tpexDay") return { ds, history: await fetchTpexHistory(code) };
   if (ds === "realtime") return { ds, realtime: await fetchRealtime(code) };
   // 證交所分時原始回應（前 1500 字）與解析後的結果，用來確認格式
+  // 暫時的探查入口：只能打 mis.twse.com.tw/stock/api/ 底下的 .jsp，用來找出分時資料的正確參數
+  if (ds === "misProbe") {
+    if (!/^[A-Za-z]{3,40}\.jsp$/.test(probe.jsp || "") || !/^[A-Za-z0-9_.=&|%-]{0,200}$/.test(probe.qs || "")) return { ds, error: "參數格式不正確" };
+    const res = await fetch("https://mis.twse.com.tw/stock/api/" + probe.jsp + "?" + probe.qs + "&_=" + Date.now(), { headers: MIS_HEADERS, signal: AbortSignal.timeout(8000) });
+    const t = await res.text();
+    return { ds, status: res.status, len: t.length, head: t.replace(/^\s+/, "").slice(0, 1800), tail: t.slice(-500) };
+  }
   if (ds === "misOhlc") {
     const raw = {};
     for (const ex of ["tse", "otc"]) raw[ex] = await misOhlcRaw(ex, code).then((t) => t.slice(0, 1500), (e) => "ERR " + e.message);
@@ -1989,7 +1997,8 @@ export default {
         if (!ds) return json(await sourceStatus(dcode, ocode));
         // 上櫃樣本（tp_*、tpexInst、tpexDay）沒指定 code 時改用 otc 代號
         const tpexDs = ds.indexOf("tp_") === 0 || ds.indexOf("tpex") === 0 || ds.indexOf("fm") === 0;
-        return json(await sourceSample(ds, tpexDs && !url.searchParams.get("code") ? ocode : dcode));
+        return json(await sourceSample(ds, tpexDs && !url.searchParams.get("code") ? ocode : dcode,
+          { jsp: url.searchParams.get("jsp") || "", qs: url.searchParams.get("qs") || "" }));
       }
 
       if (url.pathname === "/api/analyze" && request.method === "POST") {
