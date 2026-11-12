@@ -714,7 +714,7 @@
       <p class="panel-lead">一次看<b>自選股即時行情</b>、設定<b>價格警示</b>，再幫你算<b>持股損益</b>。這些設定存在這台裝置；開啟上方的「雲端同步」，手機和電腦就會看到同一份。</p>
       <div class="port-tools">
         <button class="btn-sm primary" id="portRefresh">重新整理</button>
-        <button class="btn-sm ghost" id="portAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 60 秒自動更新">自動更新：關</button>
+        <button class="btn-sm ghost" id="portAuto" title="開啟後，盤中（週一至週五 09:00–13:35）且停留在這個分頁時，每 10 秒自動更新">自動更新：關</button>
         <span class="port-status" id="portStatus"></span>
       </div>
       <div id="portBanner"></div>
@@ -2506,7 +2506,7 @@
       s=hhmm(port.asOf || new Date(port.at).toISOString())+" 更新"+(qd && qd!==twToday() ? "（報價為 "+mmdd(qd)+" 收盤）" : "");
       if(nu) s+=" · 有 "+nu+" 檔暫時無法取得最新報價，請稍後再按重新整理";
     }
-    if(auto && !port.loading && !port.err) s += (s ? " · " : "")+(isTradingTime() ? "盤中每 60 秒自動更新" : "非交易時間，暫停自動更新");
+    if(auto && !port.loading && !port.err) s += (s ? " · " : "")+(isTradingTime() ? "盤中每 10 秒自動更新" : "非交易時間，暫停自動更新");
     st.textContent=s;
     st.className="port-status"+((port.err || nu) && !port.loading ? " warn" : "");
   }
@@ -2535,7 +2535,7 @@
   }
   function portTimerSync(){
     var want = mode==="port" && portAutoOn();
-    if(want && !port.timer) port.timer=setInterval(portTick, 60000);
+    if(want && !port.timer) port.timer=setInterval(portTick, 10000);
     if(!want && port.timer){ clearInterval(port.timer); port.timer=null; }
   }
   function portEnter(){
@@ -2545,7 +2545,7 @@
     if(need || !port.at || Date.now()-port.at>30000) refreshQuotes();
   }
   document.addEventListener("visibilitychange", function(){
-    if(!document.hidden && mode==="port" && portAutoOn() && isTradingTime() && Date.now()-port.at>60000) refreshQuotes();
+    if(!document.hidden && mode==="port" && portAutoOn() && isTradingTime() && Date.now()-port.at>10000) refreshQuotes();
   });
 
   function openStock(code){
