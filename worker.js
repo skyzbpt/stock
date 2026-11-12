@@ -615,7 +615,7 @@ async function fetchQuotes(codes) {
 
 // ---- 當日分時走勢（/api/intraday：模擬交易的自選股走勢圖）----
 // 證交所沒有公開的分時序列，改用 Yahoo Finance 圖表端點（5 分鐘一點）；上市用 .TW，查不到再試上櫃 .TWO
-const INTRADAY_MAX = 20, INTRADAY_TTL = 60, INTRADAY_MIS_TTL = 15;
+const INTRADAY_MAX = 20, INTRADAY_TTL = 60, INTRADAY_LOG_TTL = 10;
 async function yahooChart(sym) {
   const res = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/" + sym + "?interval=5m&range=1d", {
     headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
@@ -633,61 +633,78 @@ function yahooTime(sec) {
   const t = [d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()].map((x) => String(x).padStart(2, "0")).join(":");
   return t >= "13:30:00" ? "13:30:00" : t;
 }
-// ---- 證交所即時行情的當日分時（每分鐘一筆，和即時報價同一個來源，不會像 Yahoo 慢 20 分鐘）----
-const MIS_OHLC_URL = "https://mis.twse.com.tw/stock/api/getOhlc.jsp";
-async function misOhlcRaw(ex, code) {
-  const res = await fetch(MIS_OHLC_URL + "?ex_ch=" + ex + "_" + code + ".tw&_=" + Date.now(), {
-    headers: MIS_HEADERS, signal: AbortSignal.timeout(MIS_TRY_MS)
-  });
-  if (!res.ok) throw new Error("MIS " + res.status);
-  return res.text();
-}
-// 一筆分時 → ["HH:MM", 價格]；時間欄可能是 "090100"／"09:01:00"／毫秒時間戳，看不懂回 null
-function misOhlcPoint(o) {
-  if (!o) return null;
-  const price = num(o.c != null ? o.c : o.z);
-  if (price == null || price <= 0) return null;
-  let hm = null;
-  const t = String(o.t == null ? "" : o.t).replace(/[^0-9]/g, "");
-  if (t.length === 6 || t.length === 4) hm = t.slice(0, 2) + ":" + t.slice(2, 4);
-  else {
-    const ms = num(o.tlong != null ? o.tlong : (t.length >= 12 ? t : null));
-    if (ms != null) { const d = new Date(ms + 8 * 3600 * 1000); hm = String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0"); }
+// ---- 走勢紀錄：證交所不提供個股分時，所以由排程（盤中每分鐘一次）把即時報價記進 D1 ----
+// ic_watch：有人在走勢圖查過的股票（排程只記這些）；ic_ticks：每分鐘最後一筆成交價
+const IC_WATCH_DAYS = 7, IC_WATCH_MAX = 30;
+let icSchema = null;
+function icReady(db) {
+  if (!icSchema) {
+    icSchema = db.batch([
+      db.prepare("CREATE TABLE IF NOT EXISTS ic_watch (code TEXT PRIMARY KEY, seen INTEGER NOT NULL)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS ic_ticks (day TEXT NOT NULL, code TEXT NOT NULL, hm TEXT NOT NULL, p REAL NOT NULL, PRIMARY KEY (day, code, hm))")
+    ]).catch((e) => { icSchema = null; throw e; });
   }
-  if (!hm || hm < "09:00" || hm > "13:30") return null;
-  return [hm, Math.round(price * 100) / 100];
+  return icSchema;
 }
-async function fetchMisOhlc(code) {
-  for (const ex of ["tse", "otc"]) {
-    let j;
-    try { j = JSON.parse(await misOhlcRaw(ex, code)); } catch (e) { continue; }
-    const arr = j && Array.isArray(j.ohlcArray) ? j.ohlcArray : null;
-    if (!arr || !arr.length) continue;
-    const pts = [];
-    for (const o of arr) {
-      const p = misOhlcPoint(o);
-      if (!p) continue;
-      const n = pts.length;
-      if (n && pts[n - 1][0] === p[0]) pts[n - 1] = p;        // 同一分鐘留最後一筆
-      else if (!n || pts[n - 1][0] < p[0]) pts.push(p);
-    }
-    if (pts.length < 2) continue;
-    const d0 = arr[0] && String(arr[0].d || "").replace(/[^0-9]/g, "");
-    const qt = j.queryTime && String(j.queryTime.sysDate || "");
-    const day = /^\d{8}$/.test(d0) ? d0 : (/^\d{8}$/.test(qt) ? qt : ymdOf(twNow()));
-    return { ex, date: day, points: pts };
+const isoDayOf = (d) => { const y = ymdOf(d); return y.slice(0, 4) + "-" + y.slice(4, 6) + "-" + y.slice(6); };
+// 排程呼叫：週一至週五 09:00–13:35（台灣時間）才記
+async function recordTicks(env) {
+  if (!env || !env.DB) return { skipped: "no_db" };
+  const now = twNow(), dow = now.getUTCDay(), mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+  if (dow < 1 || dow > 5 || mins < 540 || mins > 815) return { skipped: "closed" };
+  await icReady(env.DB);
+  const day = isoDayOf(now);
+  const watch = await env.DB.prepare("SELECT code FROM ic_watch WHERE seen > ?1 ORDER BY seen DESC LIMIT ?2")
+    .bind(Date.now() - IC_WATCH_DAYS * 86400000, IC_WATCH_MAX).all();
+  const codes = (watch.results || []).map((r) => r.code);
+  if (!codes.length) return { codes: 0 };
+  const r = await fetchQuotes(codes);
+  const stmts = [];
+  for (const c of codes) {
+    const q = r.quotes[c], hm = q && q.time ? String(q.time).slice(0, 5) : "";
+    if (!q || q.close == null || q.delayed || q.date !== day || hm < "09:00" || hm > "13:30") continue;
+    stmts.push(env.DB.prepare("INSERT OR REPLACE INTO ic_ticks (day, code, hm, p) VALUES (?1, ?2, ?3, ?4)").bind(day, c, hm, q.close));
   }
-  return null;
+  // 順手清掉 3 天前的紀錄與 7 天沒人看的股票
+  if (mins < 545) {
+    stmts.push(env.DB.prepare("DELETE FROM ic_ticks WHERE day < ?1").bind(isoDayOf(new Date(now.getTime() - 3 * 86400000))));
+    stmts.push(env.DB.prepare("DELETE FROM ic_watch WHERE seen <= ?1").bind(Date.now() - IC_WATCH_DAYS * 86400000));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+  return { codes: codes.length, written: stmts.length };
 }
-// 當日分時：優先用證交所（即時），拿不到才用 Yahoo（約慢 20 分鐘）；昨收等欄位由 Yahoo 補
-async function fetchIntraday(code) {
-  return memo("intraday2:" + code, INTRADAY_MIS_TTL, async () => {
-    const [mis, yh] = await Promise.all([fetchMisOhlc(code).catch(() => null), fetchIntradayYahoo(code).catch(() => null)]);
-    if (!mis) return yh;
-    const pts = mis.points;
-    return { code, ex: mis.ex, src: "twse", date: mis.date, points: pts, last: pts[pts.length - 1][1],
-      prevClose: yh && yh.prevClose != null ? yh.prevClose : null, open: pts[0][1], time: pts[pts.length - 1][0] + ":00" };
+async function readTicks(env, codes) {
+  const out = {};
+  if (!env || !env.DB || !codes.length) return out;
+  try {
+    await icReady(env.DB);
+    const day = isoDayOf(twNow());
+    const rs = await env.DB.prepare("SELECT code, hm, p FROM ic_ticks WHERE day = ?1 AND code IN (" + codes.map((_, i) => "?" + (i + 2)).join(",") + ") ORDER BY code, hm")
+      .bind(day, ...codes).all();
+    for (const r of rs.results || []) (out[r.code] || (out[r.code] = [])).push([r.hm, r.p]);
+  } catch (e) { /* 資料庫暫時有問題就只用 Yahoo */ }
+  return out;
+}
+async function touchWatch(env, codes) {
+  if (!env || !env.DB || !codes.length) return;
+  try {
+    await icReady(env.DB);
+    const t = Date.now();
+    await env.DB.batch(codes.map((c) => env.DB.prepare("INSERT OR REPLACE INTO ic_watch (code, seen) VALUES (?1, ?2)").bind(c, t)));
+  } catch (e) { /* 記不到不影響走勢圖 */ }
+}
+// 當日分時：Yahoo 的資料（約慢 20 分鐘）只留到第一筆自記紀錄之前，之後接排程記下的證交所即時價
+function mergeTicks(yh, tk, code) {
+  if (!tk || !tk.length) return yh;
+  const base = yh ? yh.points.filter((p) => p[0] < tk[0][0]) : [];
+  return Object.assign({ code, ex: "tse", prevClose: null }, yh || {}, {
+    src: "twse", live: tk[0][0], date: ymdOf(twNow()),
+    points: base.concat(tk), last: tk[tk.length - 1][1], time: tk[tk.length - 1][0] + ":00"
   });
+}
+async function fetchIntraday(code, tk) {
+  const yh = await fetchIntradayYahoo(code).catch(() => null);
+  return mergeTicks(yh, tk, code);
 }
 async function fetchIntradayYahoo(code) {
   return memo("intraday:" + code, INTRADAY_TTL, async () => {
@@ -719,9 +736,10 @@ async function fetchIntradayYahoo(code) {
     return null;
   });
 }
-async function fetchIntradayMany(codes) {
+async function fetchIntradayMany(codes, env) {
   const out = {}, missing = [];
-  const rs = await Promise.all(codes.map((c) => fetchIntraday(c).catch(() => null)));
+  const ticks = await readTicks(env, codes);
+  const rs = await Promise.all(codes.map((c) => fetchIntraday(c, ticks[c]).catch(() => null)));
   rs.forEach((r, i) => { if (r) out[codes[i]] = r; else missing.push(codes[i]); });
   if (codes.length && !Object.keys(out).length) throw new Error("分時走勢暫時無法取得，請稍後再試");
   return { asOf: new Date().toISOString(), charts: out, missing };
@@ -1888,8 +1906,7 @@ async function sourceStatus(code, otcCode) {
 }
 
 // /api/debug?ds=t86&code=2330 → 看欄位名稱與該代號那一列原始資料（欄位改版時用）
-async function sourceSample(ds, code, probe) {
-  probe = probe || {};
+async function sourceSample(ds, code, env0) {
   if (OPENAPI[ds] || (ds.indexOf("tp_") === 0 && TPEX_OPENAPI[ds.slice(3)])) {
     const j = OPENAPI[ds] ? await oa(ds, 60) : await tpOa(ds.slice(3), 60);
     if (!Array.isArray(j)) return { error: "fetch failed", type: typeof j };
@@ -1914,20 +1931,7 @@ async function sourceSample(ds, code, probe) {
   if (ds === "stockDay") return { ds, history: await fetchHistory(code) };
   if (ds === "tpexDay") return { ds, history: await fetchTpexHistory(code) };
   if (ds === "realtime") return { ds, realtime: await fetchRealtime(code) };
-  // 證交所分時原始回應（前 1500 字）與解析後的結果，用來確認格式
-  // 暫時的探查入口：只能打 mis.twse.com.tw/stock/api/ 底下的 .jsp，用來找出分時資料的正確參數
-  if (ds === "misProbe") {
-    if (!/^[A-Za-z]{3,40}\.jsp$/.test(probe.jsp || "") || !/^[A-Za-z0-9_.=&|%-]{0,200}$/.test(probe.qs || "")) return { ds, error: "參數格式不正確" };
-    const res = await fetch("https://mis.twse.com.tw/stock/api/" + probe.jsp + "?" + probe.qs + "&_=" + Date.now(), { headers: MIS_HEADERS, signal: AbortSignal.timeout(8000) });
-    const t = await res.text();
-    return { ds, status: res.status, len: t.length, head: t.replace(/^\s+/, "").slice(0, 1800), tail: t.slice(-500) };
-  }
-  if (ds === "misOhlc") {
-    const raw = {};
-    for (const ex of ["tse", "otc"]) raw[ex] = await misOhlcRaw(ex, code).then((t) => t.slice(0, 1500), (e) => "ERR " + e.message);
-    const parsed = await fetchMisOhlc(code).catch((e) => ({ error: e.message }));
-    return { ds, raw, parsed: parsed && parsed.points ? { ex: parsed.ex, date: parsed.date, n: parsed.points.length, head: parsed.points.slice(0, 3), tail: parsed.points.slice(-3) } : parsed };
-  }
+  if (ds === "icLog") return { ds, ticks: await readTicks(env0, [code]) };
   // FinMind 原始資料：fm_TaiwanStockPER 這類；fmSnapshot／fmExtra 看解析後的結果
   if (ds.indexOf("fm_") === 0) {
     const name = ds.slice(3);
@@ -1943,7 +1947,7 @@ async function sourceSample(ds, code, probe) {
   }
   if (ds === "fmExtra") return { ds, extra: await fmExtra(code), otcIndex: await fetchOtcIndexRt().catch((e) => ({ error: e.message })) };
   return { error: "ds 可用值：" + Object.keys(OPENAPI).concat(Object.keys(TPEX_OPENAPI).map((k) => "tp_" + k),
-    ["t86", "qfiis", "tpexPe", "tpexInst", "stockDay", "tpexDay", "realtime", "misOhlc", "fm_<FinMind 資料集>", "fmSnapshot", "fmExtra"]).join("|") };
+    ["t86", "qfiis", "tpexPe", "tpexInst", "stockDay", "tpexDay", "realtime", "icLog", "fm_<FinMind 資料集>", "fmSnapshot", "fmExtra"]).join("|") };
 }
 
 // ---- 路由 ----
@@ -1970,7 +1974,8 @@ export default {
         const p = parseCodes(url.searchParams.get("codes"));
         if (p.error) return json({ error: p.error }, 400);
         if (p.codes.length > INTRADAY_MAX) return json({ error: "一次最多查詢 " + INTRADAY_MAX + " 檔走勢" }, 400);
-        return json(await fetchIntradayMany(p.codes));
+        touchWatch(env, p.codes);  // 記下有人在看這些股票，排程才會開始記它們的即時價
+        return json(await fetchIntradayMany(p.codes, env));
       }
 
       if (url.pathname === "/api/screen") {
@@ -1997,8 +2002,7 @@ export default {
         if (!ds) return json(await sourceStatus(dcode, ocode));
         // 上櫃樣本（tp_*、tpexInst、tpexDay）沒指定 code 時改用 otc 代號
         const tpexDs = ds.indexOf("tp_") === 0 || ds.indexOf("tpex") === 0 || ds.indexOf("fm") === 0;
-        return json(await sourceSample(ds, tpexDs && !url.searchParams.get("code") ? ocode : dcode,
-          { jsp: url.searchParams.get("jsp") || "", qs: url.searchParams.get("qs") || "" }));
+        return json(await sourceSample(ds, tpexDs && !url.searchParams.get("code") ? ocode : dcode, env));
       }
 
       if (url.pathname === "/api/analyze" && request.method === "POST") {
@@ -2035,5 +2039,10 @@ export default {
     } catch (e) {
       return json({ error: String((e && e.message) || e) }, 500);
     }
+  },
+
+  // Cron 觸發（wrangler.jsonc 的 triggers.crons）：盤中每分鐘把「有人看的股票」即時價記進 D1
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(recordTicks(env).catch((e) => console.error("recordTicks", e && e.message)));
   }
 };
