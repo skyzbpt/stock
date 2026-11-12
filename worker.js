@@ -487,15 +487,26 @@ function parseMis(m) {
 // 現在：1.2 秒還沒回應（或失敗）就再發一次，誰先成功用誰；兩次都失敗回 null，由呼叫端改用備援來源
 const MIS_TRY_MS = 3500, MIS_HEDGE_MS = 1200;
 async function misOnce(exCh, n) {
-  const res = await fetch(MIS_URL + "?ex_ch=" + exCh + "&json=1&delay=0" + (n ? "&_=" + n : ""), {
+  // 網址一定要帶不重複的 &_=時間戳：不帶的話證交所會回它自己暫存的舊結果（實測落後 30～100 秒，時間還會倒退）。
+  // 同理也不放 Cloudflare 邊緣快取，每次都拿最新的
+  const res = await fetch(MIS_URL + "?ex_ch=" + exCh + "&json=1&delay=0&_=" + (Date.now() + n), {
     headers: MIS_HEADERS,
-    cf: { cacheTtl: 5, cacheEverything: true },  // 邊緣快取只留 5 秒，接近即時
     signal: AbortSignal.timeout(MIS_TRY_MS)
   });
   if (!res.ok) throw new Error("MIS " + res.status);
   const j = await res.json().catch(() => null);  // 被限流時會回 HTML
   if (!j || !Array.isArray(j.msgArray)) throw new Error("MIS 回傳格式不正確");
+  // 第一次拿到的若還是舊結果（證交所產生這份資料的時間比現在早超過 20 秒）就丟掉，讓第二次請求重抓；第二次照單全收
+  if (!n && misLagSec(j.queryTime) > 20) throw new Error("MIS 回傳的是舊資料");
   return j.msgArray;
+}
+// 證交所回應裡的 queryTime（它產生這份資料的台灣時間）距離現在幾秒；看不懂就當 0
+function misLagSec(qt) {
+  const m = qt && /^(\d{2}):(\d{2}):(\d{2})$/.exec(String(qt.sysTime || ""));
+  if (!m) return 0;
+  const now = twNow(), sec = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
+  const lag = sec - (+m[1] * 3600 + +m[2] * 60 + +m[3]);
+  return lag > 0 && lag < 43200 ? lag : 0;
 }
 function misFetch(exCh) {
   const first = misOnce(exCh, 0);
